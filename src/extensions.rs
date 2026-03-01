@@ -10065,12 +10065,35 @@ fn fs_op_read(params: &Value, path: &Path) -> std::result::Result<Value, HostCal
         }
     }
 
-    let bytes = fs::read(path).map_err(|err| HostCallError {
+    let file = std::fs::File::open(path).map_err(|err| HostCallError {
         code: HostCallErrorCode::Io,
         message: format!("read: {err}"),
         details: None,
         retryable: None,
     })?;
+
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    file.take(crate::tools::READ_TOOL_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|err| HostCallError {
+            code: HostCallErrorCode::Io,
+            message: format!("read: {err}"),
+            details: None,
+            retryable: None,
+        })?;
+
+    if bytes.len() as u64 > crate::tools::READ_TOOL_MAX_BYTES {
+        return Err(HostCallError {
+            code: HostCallErrorCode::Io,
+            message: format!(
+                "File is too large (exceeds max allowed {} bytes).",
+                crate::tools::READ_TOOL_MAX_BYTES
+            ),
+            details: None,
+            retryable: None,
+        });
+    }
 
     match encoding.to_ascii_lowercase().as_str() {
         "utf8" | "utf-8" => {
