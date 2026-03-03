@@ -1,6 +1,6 @@
 {
   "schema": "pi.ci.cross_platform_matrix.v1",
-  "generated_at": "2026-03-03T02:23:56.821Z",
+  "generated_at": "2026-03-03T21:36:01.614Z",
   "platform": "linux",
   "platform_details": {
     "arch": "x86_64",
