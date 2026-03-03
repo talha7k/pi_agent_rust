@@ -283,6 +283,11 @@ class Buffer extends Uint8Array {
       for (let i = offset; i < end; i++) {
         this[i] = bytes[(i - offset) % bytes.length];
       }
+    } else if (value instanceof Uint8Array) {
+      if (value.length === 0) return this;
+      for (let i = offset; i < end; i++) {
+        this[i] = value[(i - offset) % value.length];
+      }
     }
     return this;
   }

@@ -764,7 +764,8 @@ pub async fn run(
                                 SessionMessage::User { .. }
                                 | SessionMessage::Assistant { .. }
                                 | SessionMessage::ToolResult { .. }
-                                | SessionMessage::BashExecution { .. } => Some(msg.message.clone()),
+                                | SessionMessage::BashExecution { .. }
+                                | SessionMessage::Custom { .. } => Some(msg.message.clone()),
                                 _ => None,
                             },
                             _ => None,

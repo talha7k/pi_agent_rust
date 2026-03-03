@@ -280,7 +280,9 @@ fn persist_legacy_generated_models_cache(models: &[LegacyGeneratedModel]) {
     };
     let mut writer = std::io::BufWriter::new(file);
     if serde_json::to_writer(&mut writer, models).is_ok() && writer.flush().is_ok() {
-        let _ = fs::rename(temp_path, path);
+        let _ = fs::rename(&temp_path, path);
+    } else {
+        let _ = fs::remove_file(&temp_path);
     }
 }
 

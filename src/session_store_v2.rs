@@ -406,21 +406,21 @@ impl SessionStoreV2 {
         }
 
         let segment_path = self.segment_file_path(self.next_segment_seq);
-        let byte_offset = fs::metadata(&segment_path).map_or(0, |meta| meta.len());
 
         // Prepare the write buffer by appending the newline to the encoded JSON
         let mut write_buf = encoded;
         write_buf.push(b'\n');
 
+        let is_new_segment = self.next_frame_seq == 1;
         let mut segment = secure_open_options()
             .create(true)
             .write(true)
-            .truncate(false)
+            .truncate(is_new_segment)
             .open(&segment_path)?;
 
-        let pre_write_len = segment.seek(SeekFrom::End(0))?;
+        let byte_offset = segment.seek(SeekFrom::End(0))?;
         if let Err(e) = segment.write_all(&write_buf) {
-            let _ = segment.set_len(pre_write_len);
+            let _ = segment.set_len(byte_offset);
             return Err(Error::from(e));
         }
 
@@ -440,7 +440,7 @@ impl SessionStoreV2 {
 
         if let Err(e) = append_jsonl_line(&self.index_file_path(), &index_entry) {
             // Rollback: truncate segment to remove the unindexed frame.
-            let _ = segment.set_len(pre_write_len);
+            let _ = segment.set_len(byte_offset);
             return Err(e);
         }
 
@@ -595,7 +595,8 @@ impl SessionStoreV2 {
             .root
             .join("tmp")
             .join(format!("{checkpoint_seq:016}.json.tmp"));
-        {
+        
+        let write_result: Result<()> = (|| {
             let mut file = secure_open_options()
                 .create(true)
                 .write(true)
@@ -603,7 +604,14 @@ impl SessionStoreV2 {
                 .open(&tmp_path)?;
             file.write_all(&serde_json::to_vec_pretty(&checkpoint)?)?;
             file.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(err) = write_result {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(err);
         }
+
         fs::rename(&tmp_path, self.checkpoint_path(checkpoint_seq))?;
         Ok(checkpoint)
     }
@@ -914,7 +922,8 @@ impl SessionStoreV2 {
         manifest.integrity.manifest_hash = manifest_hash_hex(&manifest)?;
 
         let tmp = self.root.join("tmp").join("manifest.json.tmp");
-        {
+        
+        let write_result: Result<()> = (|| {
             let mut file = secure_open_options()
                 .create(true)
                 .write(true)
@@ -922,7 +931,14 @@ impl SessionStoreV2 {
                 .open(&tmp)?;
             file.write_all(&serde_json::to_vec_pretty(&manifest)?)?;
             file.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(err) = write_result {
+            let _ = fs::remove_file(&tmp);
+            return Err(err);
         }
+
         fs::rename(&tmp, self.manifest_path())?;
         Ok(manifest)
     }
