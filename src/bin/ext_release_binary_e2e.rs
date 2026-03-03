@@ -948,7 +948,7 @@ mod tests {
         match fs::remove_dir_all(&dir) {
             Ok(()) => {}
             Err(err) if err.kind() == ErrorKind::NotFound => {}
-            Err(err) => panic!(),
+            Err(err) => panic!("Failed to remove dir {:?}: {}", dir, err),
         }
         fs::create_dir_all(&dir).expect("create temp report dir");
 
