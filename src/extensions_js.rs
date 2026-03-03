@@ -5808,7 +5808,7 @@ fn resolve_module_path(
     // SEC-FIX: Enforce scope monotonicity before checking file existence (bd-k5q5.9.1.3).
     // This prevents directory traversal probes from revealing existence of files
     // outside the extension root (e.g. `../../../../etc/passwd`).
-    if roots.is_empty() {
+    if canonical_roots.is_empty() {
         return None;
     }
     let canonical = crate::extensions::safe_canonicalize(&path);
@@ -18968,7 +18968,7 @@ import { isIPv4 as netIsIpv4 } from "node:net";
         std::fs::write(&only_json, "{\"ok\":true}\n").expect("write only_json.json");
 
         let mode = RepairMode::default();
-        let roots = vec![root.to_path_buf()];
+        let roots = [root.to_path_buf()];
         let canonical_roots = roots
             .iter()
             .map(|p| crate::extensions::safe_canonicalize(p))
@@ -19026,7 +19026,7 @@ import { isIPv4 as netIsIpv4 } from "node:net";
         std::fs::write(&outside, "export const secret  = 1;\n").expect("write outside");
 
         let mode = RepairMode::default();
-        let roots = vec![extension_root];
+        let roots = [extension_root];
         let canonical_roots = roots
             .iter()
             .map(|p| crate::extensions::safe_canonicalize(p))
@@ -19058,7 +19058,7 @@ import { isIPv4 as netIsIpv4 } from "node:net";
         std::fs::write(&inside, "export const ok = 1;\n").expect("write inside");
 
         let mode = RepairMode::default();
-        let roots = vec![extension_root];
+        let roots = [extension_root];
         let canonical_roots = roots
             .iter()
             .map(|p| crate::extensions::safe_canonicalize(p))
