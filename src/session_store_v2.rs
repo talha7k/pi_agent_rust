@@ -1402,7 +1402,7 @@ pub fn session_entry_to_frame_args(
 /// Helper to cache the file descriptor when reading multiple frames sequentially.
 struct SegmentFileReader<'a> {
     store: &'a SessionStoreV2,
-    current_segment_seq: u64,
+    current_segment_seq: Option<u64>,
     current_file: Option<File>,
     current_len: u64,
 }
@@ -1411,26 +1411,29 @@ impl<'a> SegmentFileReader<'a> {
     const fn new(store: &'a SessionStoreV2) -> Self {
         Self {
             store,
-            current_segment_seq: 0,
+            current_segment_seq: None,
             current_file: None,
             current_len: 0,
         }
     }
 
     fn read_frame(&mut self, row: &OffsetIndexEntry) -> Result<Option<SegmentFrame>> {
-        if self.current_segment_seq != row.segment_seq || self.current_file.is_none() {
+        if self.current_segment_seq != Some(row.segment_seq) {
+            self.current_segment_seq = Some(row.segment_seq);
             let path = self.store.segment_file_path(row.segment_seq);
             if !path.exists() {
                 self.current_file = None;
-                return Ok(None);
+            } else {
+                let file = File::open(&path)?;
+                self.current_len = file.metadata()?.len();
+                self.current_file = Some(file);
             }
-            let file = File::open(&path)?;
-            self.current_len = file.metadata()?.len();
-            self.current_file = Some(file);
-            self.current_segment_seq = row.segment_seq;
         }
 
-        let file = self.current_file.as_mut().unwrap();
+        let Some(file) = self.current_file.as_mut() else {
+            return Ok(None);
+        };
+
         let end_offset = row
             .byte_offset
             .checked_add(row.byte_length)
