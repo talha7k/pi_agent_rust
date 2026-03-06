@@ -16243,6 +16243,7 @@ function __pi_build_extension_ui_template(hasUI) {
             }, 16);
 
             pollInput();
+            needsRender = false;
             await pushFrame();
 
             while (!done) {
@@ -20297,7 +20298,7 @@ export default ConfigLoader;
                 serde_json::json!([80])
             );
 
-            let mut saw_initial_dirty_rerender = false;
+            let mut saw_post_startup_poll = false;
             for step in 0..12 {
                 let next_deadline = runtime
                     .scheduler
@@ -20321,32 +20322,18 @@ export default ConfigLoader;
 
                 match &request.kind {
                     HostcallKind::Ui { op } if op == "custom" => {
-                        let width = if saw_initial_dirty_rerender { 40 } else { 80 };
+                        saw_post_startup_poll = true;
                         runtime.complete_hostcall(
                             request.call_id,
-                            HostcallOutcome::Success(serde_json::json!({ "width": width })),
+                            HostcallOutcome::Success(serde_json::json!({ "width": 40 })),
                         );
                         runtime.tick().await.expect("deliver poll completion");
                     }
                     HostcallKind::Ui { op } if op == "setWidget" => {
-                        if !saw_initial_dirty_rerender {
-                            assert_eq!(
-                                request.payload["lines"],
-                                serde_json::json!(["width:80"]),
-                                "first timer-driven frame should consume the initial dirty render"
-                            );
-                            saw_initial_dirty_rerender = true;
-                            runtime.complete_hostcall(
-                                request.call_id,
-                                HostcallOutcome::Success(serde_json::json!(null)),
-                            );
-                            runtime
-                                .tick()
-                                .await
-                                .expect("deliver initial rerender completion");
-                            continue;
-                        }
-
+                        assert!(
+                            saw_post_startup_poll,
+                            "startup should not enqueue a redundant timer-driven frame"
+                        );
                         assert_eq!(
                             request.payload["lines"],
                             serde_json::json!(["width:40"]),
