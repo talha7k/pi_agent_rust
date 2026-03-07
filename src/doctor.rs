@@ -1121,8 +1121,24 @@ fn check_extension(
         return Ok(());
     }
 
-    let config = Config::load()?;
-    let resolved = config.resolve_extension_policy_with_metadata(policy_override);
+    let config_path = std::env::var_os("PI_CONFIG_PATH").map(PathBuf::from);
+    let resolved = match Config::load_with_roots(config_path.as_deref(), &Config::global_dir(), cwd)
+    {
+        Ok(config) => config.resolve_extension_policy_with_metadata(policy_override),
+        Err(err) => {
+            findings.push(
+                Finding::fail(
+                    cat,
+                    "Failed to load configuration for extension policy resolution",
+                )
+                .with_detail(err.to_string())
+                .with_remediation(
+                    "Fix the malformed settings.json, point PI_CONFIG_PATH at a valid file, or rerun with `--policy <safe|balanced|permissive>` to inspect extension compatibility independently",
+                ),
+            );
+            Config::default().resolve_extension_policy_with_metadata(policy_override)
+        }
+    };
     let ext_id = ext_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -1193,6 +1209,32 @@ fn check_extension(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+
+    struct CurrentDirGuard {
+        original: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn set(path: &Path) -> Self {
+            let original = std::env::current_dir().expect("read current dir");
+            std::env::set_current_dir(path).expect("set current dir");
+            Self { original }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
+    fn write_extension_fixture(cwd: &Path, source: &str) -> PathBuf {
+        let extension_dir = cwd.join("ext");
+        std::fs::create_dir_all(&extension_dir).expect("create extension dir");
+        std::fs::write(extension_dir.join("index.js"), source).expect("write extension source");
+        extension_dir
+    }
 
     #[test]
     fn severity_ordering() {
@@ -1499,6 +1541,87 @@ mod tests {
                 .iter()
                 .any(|f| f.category == CheckCategory::Extensions && f.severity == Severity::Fail),
             "extensions-only mode without a path should emit a clear failure finding"
+        );
+    }
+
+    #[test]
+    fn run_doctor_extension_path_uses_supplied_cwd_for_policy_resolution() {
+        let current_dir = tempfile::tempdir().expect("current dir");
+        let _guard = CurrentDirGuard::set(current_dir.path());
+        let project = tempfile::tempdir().expect("project dir");
+        let config_dir = project.path().join(".pi");
+        std::fs::create_dir_all(&config_dir).expect("create project config dir");
+        std::fs::write(
+            config_dir.join("settings.json"),
+            r#"{ "extensionPolicy": { "profile": "safe" } }"#,
+        )
+        .expect("write project settings");
+        write_extension_fixture(
+            project.path(),
+            r#"
+const { exec } = require("child_process");
+export default function(pi) {
+    pi.exec("ls");
+}
+"#,
+        );
+
+        let opts = DoctorOptions {
+            cwd: project.path(),
+            extension_path: Some("ext"),
+            policy_override: None,
+            fix: false,
+            only: None,
+        };
+        let report = run_doctor(&opts).expect("doctor report");
+
+        assert!(
+            report.findings.iter().any(|f| f.title.contains("exec")),
+            "doctor should honor the supplied cwd's safe policy and flag exec use"
+        );
+    }
+
+    #[test]
+    fn run_doctor_extension_path_reports_config_load_failure_without_aborting() {
+        let current_dir = tempfile::tempdir().expect("current dir");
+        let _guard = CurrentDirGuard::set(current_dir.path());
+        let project = tempfile::tempdir().expect("project dir");
+        let config_dir = project.path().join(".pi");
+        std::fs::create_dir_all(&config_dir).expect("create project config dir");
+        std::fs::write(config_dir.join("settings.json"), r#"{ "extensionPolicy": "#)
+            .expect("write malformed project settings");
+        write_extension_fixture(
+            project.path(),
+            r#"
+import net from "node:net";
+"#,
+        );
+
+        let opts = DoctorOptions {
+            cwd: project.path(),
+            extension_path: Some("ext"),
+            policy_override: None,
+            fix: false,
+            only: None,
+        };
+        let report = run_doctor(&opts).expect("doctor report");
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|f| f.category == CheckCategory::Extensions),
+            "extension path mode should keep findings scoped to extensions"
+        );
+        assert!(
+            report.findings.iter().any(|f| {
+                f.title == "Failed to load configuration for extension policy resolution"
+            }),
+            "doctor should surface config load failures as findings instead of returning Err"
+        );
+        assert!(
+            report.findings.iter().any(|f| f.title.contains("node:net")),
+            "doctor should continue extension analysis after a config load failure"
         );
     }
 
