@@ -399,7 +399,22 @@ fn sqlite_i64_from_u64(field: &str, value: u64) -> Result<i64> {
         .map_err(|_| Error::session(format!("{field} exceeds SQLite INTEGER range: {value}")))
 }
 
+fn sqlite_u64_from_i64(field: &str, value: i64) -> Result<u64> {
+    u64::try_from(value).map_err(|_| {
+        Error::session(format!(
+            "{field} must be non-negative in session index: {value}"
+        ))
+    })
+}
+
 fn row_to_meta(row: &sqlmodel_core::Row) -> Result<SessionMeta> {
+    let message_count = row
+        .get_named::<i64>("message_count")
+        .map_err(|e| Error::session(format!("get message_count: {e}")))?;
+    let size_bytes = row
+        .get_named::<i64>("size_bytes")
+        .map_err(|e| Error::session(format!("get size_bytes: {e}")))?;
+
     Ok(SessionMeta {
         path: row
             .get_named("path")
@@ -413,19 +428,11 @@ fn row_to_meta(row: &sqlmodel_core::Row) -> Result<SessionMeta> {
         timestamp: row
             .get_named("timestamp")
             .map_err(|e| Error::session(format!("get timestamp: {e}")))?,
-        message_count: u64::try_from(
-            row.get_named::<i64>("message_count")
-                .map_err(|e| Error::session(format!("get message_count: {e}")))?,
-        )
-        .unwrap_or(0),
+        message_count: sqlite_u64_from_i64("message_count", message_count)?,
         last_modified_ms: row
             .get_named("last_modified_ms")
             .map_err(|e| Error::session(format!("get last_modified_ms: {e}")))?,
-        size_bytes: u64::try_from(
-            row.get_named::<i64>("size_bytes")
-                .map_err(|e| Error::session(format!("get size_bytes: {e}")))?,
-        )
-        .unwrap_or(0),
+        size_bytes: sqlite_u64_from_i64("size_bytes", size_bytes)?,
         name: row
             .get_named::<Option<String>>("name")
             .map_err(|e| Error::session(format!("get name: {e}")))?,
@@ -1225,6 +1232,82 @@ mod tests {
         assert!(err.is_err());
     }
 
+    #[test]
+    fn list_sessions_errors_on_negative_message_count() {
+        let harness = TestHarness::new("list_sessions_errors_on_negative_message_count");
+        let root = harness.temp_path("sessions");
+        fs::create_dir_all(&root).expect("create root dir");
+        let index = SessionIndex::for_sessions_root(&root);
+
+        index
+            .with_lock(|conn| {
+                init_schema(conn)?;
+                conn.execute_sync(
+                    "INSERT INTO sessions (path,id,cwd,timestamp,message_count,last_modified_ms,size_bytes,name)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    &[
+                        Value::Text("/tmp/negative-message-count.jsonl".to_string()),
+                        Value::Text("id-neg".to_string()),
+                        Value::Text("cwd-neg".to_string()),
+                        Value::Text("2026-01-01T00:00:00Z".to_string()),
+                        Value::BigInt(-1),
+                        Value::BigInt(1),
+                        Value::BigInt(1),
+                        Value::Null,
+                    ],
+                )
+                .map_err(|err| Error::session(format!("insert negative row: {err}")))?;
+                Ok(())
+            })
+            .expect("seed negative row");
+
+        let err = index
+            .list_sessions(None)
+            .expect_err("negative count should error");
+        assert!(
+            matches!(err, Error::Session(ref msg) if msg.contains("message_count must be non-negative")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn list_sessions_errors_on_negative_size_bytes() {
+        let harness = TestHarness::new("list_sessions_errors_on_negative_size_bytes");
+        let root = harness.temp_path("sessions");
+        fs::create_dir_all(&root).expect("create root dir");
+        let index = SessionIndex::for_sessions_root(&root);
+
+        index
+            .with_lock(|conn| {
+                init_schema(conn)?;
+                conn.execute_sync(
+                    "INSERT INTO sessions (path,id,cwd,timestamp,message_count,last_modified_ms,size_bytes,name)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    &[
+                        Value::Text("/tmp/negative-size-bytes.jsonl".to_string()),
+                        Value::Text("id-neg".to_string()),
+                        Value::Text("cwd-neg".to_string()),
+                        Value::Text("2026-01-01T00:00:00Z".to_string()),
+                        Value::BigInt(1),
+                        Value::BigInt(1),
+                        Value::BigInt(-1),
+                        Value::Null,
+                    ],
+                )
+                .map_err(|err| Error::session(format!("insert negative row: {err}")))?;
+                Ok(())
+            })
+            .expect("seed negative row");
+
+        let err = index
+            .list_sessions(None)
+            .expect_err("negative size should error");
+        assert!(
+            matches!(err, Error::Session(ref msg) if msg.contains("size_bytes must be non-negative")),
+            "unexpected error: {err:?}"
+        );
+    }
+
     // ── is_session_file_path ────────────────────────────────────────
 
     #[test]
@@ -1690,7 +1773,16 @@ mod tests {
                 })
                 .expect("seed session rows");
 
-            let listed = index.list_sessions(None).expect("list all sessions");
+            let has_invalid_unsigned = rows
+                .iter()
+                .any(|row| row.message_count < 0 || row.size_bytes < 0);
+
+            let listed = index.list_sessions(None);
+            if has_invalid_unsigned {
+                prop_assert!(listed.is_err(), "negative message_count/size_bytes should error");
+                return Ok(());
+            }
+            let listed = listed.expect("list all sessions");
             prop_assert_eq!(listed.len(), rows.len());
             for pair in listed.windows(2) {
                 prop_assert!(pair[0].last_modified_ms >= pair[1].last_modified_ms);
@@ -1703,8 +1795,14 @@ mod tests {
                 prop_assert_eq!(&meta.id, &expected.id);
                 prop_assert_eq!(&meta.cwd, &expected.cwd);
                 prop_assert_eq!(&meta.timestamp, &expected.timestamp);
-                prop_assert_eq!(meta.message_count, u64::try_from(expected.message_count).unwrap_or(0));
-                prop_assert_eq!(meta.size_bytes, u64::try_from(expected.size_bytes).unwrap_or(0));
+                prop_assert_eq!(
+                    meta.message_count,
+                    u64::try_from(expected.message_count).expect("filtered non-negative count")
+                );
+                prop_assert_eq!(
+                    meta.size_bytes,
+                    u64::try_from(expected.size_bytes).expect("filtered non-negative size")
+                );
                 prop_assert_eq!(&meta.name, &expected.name);
             }
 

@@ -436,6 +436,106 @@ fn read_active_path_branching_returns_only_branch() -> PiResult<()> {
 }
 
 #[test]
+fn read_active_path_errors_on_cyclic_parent_chain() -> PiResult<()> {
+    let dir = tempdir()?;
+    let mut store = SessionStoreV2::create(dir.path(), 4 * 1024)?;
+    store.append_entry("A", None, "message", json!({"v":"A"}))?;
+    store.append_entry("B", Some("A".to_string()), "message", json!({"v":"B"}))?;
+
+    let segment_path = store.segment_file_path(1);
+    let mut frames = store.read_segment(1)?;
+    assert_eq!(frames.len(), 2);
+    frames[1].parent_entry_id = Some("B".to_string());
+
+    let mut encoded = String::new();
+    for frame in frames {
+        encoded.push_str(&serde_json::to_string(&frame)?);
+        encoded.push('\n');
+    }
+    fs::write(&segment_path, encoded)?;
+
+    let err = store
+        .read_active_path("B")
+        .expect_err("cyclic parent chain must fail");
+    assert!(err.to_string().contains("cyclic parent chain detected"));
+    Ok(())
+}
+
+#[test]
+fn read_active_path_errors_on_duplicate_entry_ids() -> PiResult<()> {
+    let dir = tempdir()?;
+    let mut store = SessionStoreV2::create(dir.path(), 4 * 1024)?;
+    store.append_entry("A", None, "message", json!({"v":"A"}))?;
+    store.append_entry("B", Some("A".to_string()), "message", json!({"v":"B"}))?;
+
+    let index_path = store.index_file_path();
+    let mut rows = read_index_json_rows(&index_path)?;
+    assert_eq!(rows.len(), 2);
+    rows[1]["entryId"] = Value::String("A".to_string());
+    write_index_json_rows(&index_path, &rows)?;
+
+    let err = store
+        .read_active_path("A")
+        .expect_err("duplicate entry_id must fail");
+    assert!(err.to_string().contains("duplicate entry_id detected"));
+    Ok(())
+}
+
+#[test]
+fn validate_integrity_rejects_duplicate_frame_entry_ids() -> PiResult<()> {
+    let dir = tempdir()?;
+    let mut store = SessionStoreV2::create(dir.path(), 4 * 1024)?;
+    store.append_entry("A", None, "message", json!({"v":"A"}))?;
+    store.append_entry("B", Some("A".to_string()), "message", json!({"v":"B"}))?;
+
+    let segment_path = store.segment_file_path(1);
+    let mut frames = store.read_segment(1)?;
+    assert_eq!(frames.len(), 2);
+    frames[1].entry_id = "A".to_string();
+
+    let mut encoded = String::new();
+    for frame in frames {
+        encoded.push_str(&serde_json::to_string(&frame)?);
+        encoded.push('\n');
+    }
+    fs::write(&segment_path, encoded)?;
+    store.rebuild_index()?;
+
+    let err = store
+        .validate_integrity()
+        .expect_err("duplicate frame entry IDs must fail integrity validation");
+    assert!(err.to_string().contains("duplicate entry_id detected"));
+    Ok(())
+}
+
+#[test]
+fn validate_integrity_rejects_cyclic_parent_chain() -> PiResult<()> {
+    let dir = tempdir()?;
+    let mut store = SessionStoreV2::create(dir.path(), 4 * 1024)?;
+    store.append_entry("A", None, "message", json!({"v":"A"}))?;
+    store.append_entry("B", Some("A".to_string()), "message", json!({"v":"B"}))?;
+
+    let segment_path = store.segment_file_path(1);
+    let mut frames = store.read_segment(1)?;
+    assert_eq!(frames.len(), 2);
+    frames[1].parent_entry_id = Some("B".to_string());
+
+    let mut encoded = String::new();
+    for frame in frames {
+        encoded.push_str(&serde_json::to_string(&frame)?);
+        encoded.push('\n');
+    }
+    fs::write(&segment_path, encoded)?;
+    store.rebuild_index()?;
+
+    let err = store
+        .validate_integrity()
+        .expect_err("cyclic parent chains must fail integrity validation");
+    assert!(err.to_string().contains("cyclic parent chain detected"));
+    Ok(())
+}
+
+#[test]
 fn frame_to_session_entry_roundtrip() -> PiResult<()> {
     let dir = tempdir()?;
     let mut store = SessionStoreV2::create(dir.path(), 4 * 1024)?;

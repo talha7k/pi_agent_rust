@@ -549,15 +549,27 @@ impl SessionStoreV2 {
     /// Returns frames in root→leaf order.
     pub fn read_active_path(&self, leaf_entry_id: &str) -> Result<Vec<SegmentFrame>> {
         let index_rows = self.read_index()?;
-        let id_to_row: std::collections::HashMap<&str, &OffsetIndexEntry> = index_rows
-            .iter()
-            .map(|row| (row.entry_id.as_str(), row))
-            .collect();
+        let mut id_to_row: std::collections::HashMap<&str, &OffsetIndexEntry> =
+            std::collections::HashMap::with_capacity(index_rows.len());
+        for row in &index_rows {
+            if id_to_row.insert(row.entry_id.as_str(), row).is_some() {
+                return Err(Error::session(format!(
+                    "duplicate entry_id detected while reading active path: {}",
+                    row.entry_id
+                )));
+            }
+        }
 
         let mut frames = Vec::new();
         let mut current_id: Option<String> = Some(leaf_entry_id.to_string());
         let mut reader = SegmentFileReader::new(self);
+        let mut visited = std::collections::HashSet::new();
         while let Some(ref entry_id) = current_id {
+            if !visited.insert(entry_id.clone()) {
+                return Err(Error::session(format!(
+                    "cyclic parent chain detected while reading active path at entry_id={entry_id}"
+                )));
+            }
             let row = id_to_row.get(entry_id.as_str());
             let row = match row {
                 Some(r) => *r,
@@ -565,6 +577,12 @@ impl SessionStoreV2 {
             };
             match reader.read_frame(row)? {
                 Some(frame) => {
+                    if frame.entry_id != row.entry_id {
+                        return Err(Error::session(format!(
+                            "active path index/frame mismatch for entry_id={} frame={}",
+                            row.entry_id, frame.entry_id
+                        )));
+                    }
                     current_id.clone_from(&frame.parent_entry_id);
                     frames.push(frame);
                 }
@@ -1198,6 +1216,8 @@ impl SessionStoreV2 {
     pub fn validate_integrity(&self) -> Result<()> {
         let index_rows = self.read_index()?;
         let mut last_entry_seq = 0;
+        let mut parent_by_entry: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::with_capacity(index_rows.len());
 
         // Group rows by segment to minimize file opens
         let mut rows_by_segment: std::collections::BTreeMap<u64, Vec<&OffsetIndexEntry>> =
@@ -1279,8 +1299,20 @@ impl SessionStoreV2 {
                         row.entry_seq
                     )));
                 }
+
+                if parent_by_entry
+                    .insert(frame.entry_id.clone(), frame.parent_entry_id.clone())
+                    .is_some()
+                {
+                    return Err(Error::session(format!(
+                        "duplicate entry_id detected in session store: {}",
+                        frame.entry_id
+                    )));
+                }
             }
         }
+
+        validate_parent_graph_acyclic(&parent_by_entry)?;
 
         Ok(())
     }
@@ -1387,6 +1419,56 @@ fn is_recoverable_index_error(error: &Error) -> bool {
         }
         _ => false,
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParentGraphVisitState {
+    Visiting,
+    Visited,
+}
+
+fn validate_parent_graph_acyclic(
+    parent_by_entry: &std::collections::HashMap<String, Option<String>>,
+) -> Result<()> {
+    let mut visit_state: std::collections::HashMap<&str, ParentGraphVisitState> =
+        std::collections::HashMap::with_capacity(parent_by_entry.len());
+
+    for entry_id in parent_by_entry.keys() {
+        if visit_state.get(entry_id.as_str()) == Some(&ParentGraphVisitState::Visited) {
+            continue;
+        }
+
+        let mut stack = vec![(entry_id.as_str(), false)];
+        while let Some((current_id, expanded)) = stack.pop() {
+            if expanded {
+                visit_state.insert(current_id, ParentGraphVisitState::Visited);
+                continue;
+            }
+
+            match visit_state.get(current_id).copied() {
+                Some(ParentGraphVisitState::Visited) => continue,
+                Some(ParentGraphVisitState::Visiting) => {
+                    return Err(Error::session(format!(
+                        "cyclic parent chain detected in session store at entry_id={current_id}"
+                    )));
+                }
+                None => {}
+            }
+
+            visit_state.insert(current_id, ParentGraphVisitState::Visiting);
+            stack.push((current_id, true));
+
+            if let Some(parent_id) = parent_by_entry
+                .get(current_id)
+                .and_then(std::option::Option::as_deref)
+                && parent_by_entry.contains_key(parent_id)
+            {
+                stack.push((parent_id, false));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Convert a V2 `SegmentFrame` payload back into a `SessionEntry`.
