@@ -33,8 +33,6 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 /// Current session file format version.
 pub const SESSION_VERSION: u8 = 3;
 
-type JsonlSaveResult = std::result::Result<Vec<SessionEntry>, (Error, Vec<SessionEntry>)>;
-
 /// Handle to a thread-safe shared session.
 #[derive(Clone, Debug)]
 pub struct SessionHandle(pub Arc<Mutex<Session>>);
@@ -1602,10 +1600,10 @@ impl Session {
 
                     let session_name = self.cached_name.clone();
                     // === Full rewrite path (first save, header change, checkpoint) ===
-                    let (tx, rx) = oneshot::channel::<JsonlSaveResult>();
+                    let (tx, rx) = oneshot::channel::<Result<()>>();
 
                     let header_snapshot = self.header.clone();
-                    let entries_to_save = std::mem::take(&mut self.entries);
+                    let entries_to_save = self.entries.clone();
 
                     let path_for_thread = path_clone.clone();
                     let handle = thread::spawn(move || {
@@ -1638,16 +1636,7 @@ impl Session {
                             Ok(())
                         })();
                         let cx = AgentCx::for_request();
-                        if tx
-                            .send(
-                                cx.cx(),
-                                match res {
-                                    Ok(()) => Ok(entries),
-                                    Err(err) => Err((err, entries)),
-                                },
-                            )
-                            .is_err()
-                        {
+                        if tx.send(cx.cx(), res).is_err() {
                             tracing::debug!(
                                 "Session save task completed but receiver dropped (cancelled)"
                             );
@@ -1666,8 +1655,7 @@ impl Session {
                     }
 
                     match result {
-                        Ok(entries) => {
-                            self.entries = entries;
+                        Ok(_) => {
                             // Keep derived caches as-is: save path does not mutate entry ordering/content.
                             self.persisted_entry_count
                                 .store(self.entries.len(), Ordering::SeqCst);
@@ -1675,8 +1663,7 @@ impl Session {
                             self.appends_since_checkpoint = 0;
                             Ok(())
                         }
-                        Err((err, entries)) => {
-                            self.entries = entries;
+                        Err((err, _)) => {
                             Err(err)
                         }
                     }?;
@@ -8243,8 +8230,8 @@ mod tests {
 
     #[test]
     fn crash_entries_survive_failed_full_rewrite() {
-        // std::mem::take moves entries out during full rewrite.
-        // On error they must be restored.
+        // Entries are cloned during full rewrite to avoid losing them if the async future drops.
+        // On error, the session must still contain the entries in memory.
         let temp_dir = tempfile::tempdir().unwrap();
         let mut session = Session::create();
         session.session_dir = Some(temp_dir.path().to_path_buf());
