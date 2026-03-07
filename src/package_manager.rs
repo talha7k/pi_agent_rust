@@ -100,18 +100,26 @@ pub struct ResolveRoots {
     pub project_settings_path: PathBuf,
     pub global_base_dir: PathBuf,
     pub project_base_dir: PathBuf,
+    pub project_settings_enabled: bool,
 }
 
 impl ResolveRoots {
-    /// Build roots using the default Pi settings locations (env + cwd).
-    #[must_use]
-    pub fn from_env(cwd: &Path) -> Self {
+    fn from_override(cwd: &Path, config_override_path: Option<PathBuf>) -> Self {
         Self {
-            global_settings_path: global_settings_path(cwd),
+            global_settings_path: config_override_path
+                .clone()
+                .unwrap_or_else(|| Config::global_dir().join("settings.json")),
             project_settings_path: project_settings_path(cwd),
             global_base_dir: Config::global_dir(),
             project_base_dir: cwd.join(Config::project_dir()),
+            project_settings_enabled: config_override_path.is_none(),
         }
+    }
+
+    /// Build roots using the default Pi settings locations (env + cwd).
+    #[must_use]
+    pub fn from_env(cwd: &Path) -> Self {
+        Self::from_override(cwd, Config::config_path_override_from_env(cwd))
     }
 }
 
@@ -417,17 +425,26 @@ impl PackageManager {
 
     /// Synchronous variant of [`Self::list_packages`] for startup fast paths.
     pub fn list_packages_blocking(&self) -> Result<Vec<PackageEntry>> {
-        self.list_packages_sync()
+        let roots = ResolveRoots::from_env(&self.cwd);
+        self.list_packages_with_roots(&roots)
     }
 
     fn list_packages_sync(&self) -> Result<Vec<PackageEntry>> {
-        let global = list_packages_in_settings(&global_settings_path(&self.cwd))?
+        self.list_packages_blocking()
+    }
+
+    fn list_packages_with_roots(&self, roots: &ResolveRoots) -> Result<Vec<PackageEntry>> {
+        let global = list_packages_in_settings(&roots.global_settings_path)?
             .into_iter()
             .map(|mut p| {
                 p.scope = PackageScope::User;
                 p
             });
-        let project = list_packages_in_settings(&project_settings_path(&self.cwd))?
+        let project = roots
+            .project_settings_enabled
+            .then(|| list_packages_in_settings(&roots.project_settings_path))
+            .transpose()?
+            .unwrap_or_default()
             .into_iter()
             .map(|mut p| {
                 p.scope = PackageScope::Project;
@@ -452,7 +469,7 @@ impl PackageManager {
         roots: &ResolveRoots,
     ) -> Result<Option<ResolvedPaths>> {
         let global = read_settings_snapshot(&roots.global_settings_path)?;
-        let project = read_settings_snapshot(&roots.project_settings_path)?;
+        let project = read_project_settings_snapshot(roots)?;
 
         let mut all_packages: Vec<ScopedPackage> = Vec::new();
         all_packages.extend(global.packages.iter().cloned().map(|pkg| ScopedPackage {
@@ -575,7 +592,7 @@ impl PackageManager {
         let handle = thread::spawn(move || {
             let res: Result<(SettingsSnapshot, SettingsSnapshot, Vec<ScopedPackage>)> = (|| {
                 let global = read_settings_snapshot(&roots_for_setup.global_settings_path)?;
-                let project = read_settings_snapshot(&roots_for_setup.project_settings_path)?;
+                let project = read_project_settings_snapshot(&roots_for_setup)?;
 
                 // 1) Package resources (global + project, deduped; project wins)
                 let mut all_packages: Vec<ScopedPackage> = Vec::new();
@@ -1366,7 +1383,7 @@ struct PackageSpec {
     filter: Option<PackageFilter>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SettingsSnapshot {
     packages: Vec<PackageSpec>,
     extensions: Vec<String>,
@@ -1408,6 +1425,14 @@ fn read_settings_snapshot(path: &Path) -> Result<SettingsSnapshot> {
         prompts: extract_string_array(value.get("prompts")),
         themes: extract_string_array(value.get("themes")),
     })
+}
+
+fn read_project_settings_snapshot(roots: &ResolveRoots) -> Result<SettingsSnapshot> {
+    if roots.project_settings_enabled {
+        read_settings_snapshot(&roots.project_settings_path)
+    } else {
+        Ok(SettingsSnapshot::default())
+    }
 }
 
 fn extract_string_array(value: Option<&Value>) -> Vec<String> {
