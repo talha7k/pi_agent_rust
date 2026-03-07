@@ -409,7 +409,14 @@ struct TextKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ReasoningKey {
     item_id: String,
-    summary_index: u32,
+    kind: ReasoningKind,
+    index: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ReasoningKind {
+    Summary,
+    Text,
 }
 
 struct ToolCallState {
@@ -526,10 +533,11 @@ where
         idx
     }
 
-    fn reasoning_block_for(&mut self, item_id: String, summary_index: u32) -> usize {
+    fn reasoning_block_for(&mut self, kind: ReasoningKind, item_id: String, index: u32) -> usize {
         let key = ReasoningKey {
             item_id,
-            summary_index,
+            kind,
+            index,
         };
         if let Some(idx) = self.reasoning_blocks.get(&key) {
             return *idx;
@@ -546,6 +554,24 @@ where
         self.pending_events
             .push_back(StreamEvent::ThinkingStart { content_index: idx });
         idx
+    }
+
+    fn append_reasoning_delta(
+        &mut self,
+        kind: ReasoningKind,
+        item_id: String,
+        index: u32,
+        delta: String,
+    ) {
+        self.ensure_started();
+        let idx = self.reasoning_block_for(kind, item_id, index);
+        if let Some(ContentBlock::Thinking(block)) = self.partial.content.get_mut(idx) {
+            block.thinking.push_str(&delta);
+        }
+        self.pending_events.push_back(StreamEvent::ThinkingDelta {
+            content_index: idx,
+            delta,
+        });
     }
 
     fn apply_text_snapshot(&mut self, item_id: String, content_index: u32, text: String) {
@@ -574,9 +600,15 @@ where
         block.text.clone_from(&text);
     }
 
-    fn apply_reasoning_snapshot(&mut self, item_id: String, summary_index: u32, text: String) {
+    fn apply_reasoning_snapshot(
+        &mut self,
+        kind: ReasoningKind,
+        item_id: String,
+        index: u32,
+        text: String,
+    ) {
         self.ensure_started();
-        let idx = self.reasoning_block_for(item_id, summary_index);
+        let idx = self.reasoning_block_for(kind, item_id, index);
         let Some(ContentBlock::Thinking(block)) = self.partial.content.get_mut(idx) else {
             return;
         };
@@ -626,15 +658,14 @@ where
                 summary_index,
                 delta,
             } => {
-                self.ensure_started();
-                let idx = self.reasoning_block_for(item_id, summary_index);
-                if let Some(ContentBlock::Thinking(t)) = self.partial.content.get_mut(idx) {
-                    t.thinking.push_str(&delta);
-                }
-                self.pending_events.push_back(StreamEvent::ThinkingDelta {
-                    content_index: idx,
-                    delta,
-                });
+                self.append_reasoning_delta(ReasoningKind::Summary, item_id, summary_index, delta);
+            }
+            OpenAIResponsesChunk::ReasoningTextDelta {
+                item_id,
+                content_index,
+                delta,
+            } => {
+                self.append_reasoning_delta(ReasoningKind::Text, item_id, content_index, delta);
             }
             OpenAIResponsesChunk::OutputTextDone {
                 item_id,
@@ -652,16 +683,33 @@ where
                     self.apply_text_snapshot(item_id, content_index, text);
                 }
                 OpenAIResponsesContentPartDone::ReasoningText { text } => {
-                    self.apply_reasoning_snapshot(item_id, content_index, text);
+                    self.apply_reasoning_snapshot(
+                        ReasoningKind::Text,
+                        item_id,
+                        content_index,
+                        text,
+                    );
                 }
                 OpenAIResponsesContentPartDone::Unknown => {}
             },
+            OpenAIResponsesChunk::ReasoningTextDone {
+                item_id,
+                content_index,
+                text,
+            } => {
+                self.apply_reasoning_snapshot(ReasoningKind::Text, item_id, content_index, text);
+            }
             OpenAIResponsesChunk::ReasoningSummaryTextDone {
                 item_id,
                 summary_index,
                 text,
             } => {
-                self.apply_reasoning_snapshot(item_id, summary_index, text);
+                self.apply_reasoning_snapshot(
+                    ReasoningKind::Summary,
+                    item_id,
+                    summary_index,
+                    text,
+                );
             }
             OpenAIResponsesChunk::ReasoningSummaryPartDone {
                 item_id,
@@ -669,7 +717,12 @@ where
                 part,
             } => match part {
                 OpenAIResponsesReasoningSummaryPartDone::SummaryText { text } => {
-                    self.apply_reasoning_snapshot(item_id, summary_index, text);
+                    self.apply_reasoning_snapshot(
+                        ReasoningKind::Summary,
+                        item_id,
+                        summary_index,
+                        text,
+                    );
                 }
                 OpenAIResponsesReasoningSummaryPartDone::Unknown => {}
             },
@@ -1251,6 +1304,18 @@ enum OpenAIResponsesChunk {
         item_id: String,
         content_index: u32,
         part: OpenAIResponsesContentPartDone,
+    },
+    #[serde(rename = "response.reasoning_text.delta")]
+    ReasoningTextDelta {
+        item_id: String,
+        content_index: u32,
+        delta: String,
+    },
+    #[serde(rename = "response.reasoning_text.done")]
+    ReasoningTextDone {
+        item_id: String,
+        content_index: u32,
+        text: String,
     },
     #[serde(rename = "response.reasoning_summary_text.delta")]
     ReasoningSummaryTextDelta {
@@ -1896,6 +1961,123 @@ mod tests {
                 content,
             }) if content == "Plan first, answer second."
         ));
+    }
+
+    #[test]
+    fn test_stream_materializes_reasoning_text_done_without_deltas() {
+        let events = vec![
+            json!({
+                "type": "response.reasoning_text.done",
+                "item_id": "rt_done",
+                "content_index": 0,
+                "text": "Private chain of thought."
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "incomplete_details": null,
+                    "usage": {
+                        "input_tokens": 1,
+                        "output_tokens": 1,
+                        "total_tokens": 2
+                    }
+                }
+            }),
+        ];
+
+        let out = collect_events(&events);
+        assert!(matches!(out.first(), Some(StreamEvent::Start { .. })));
+        assert!(matches!(
+            out.get(1),
+            Some(StreamEvent::ThinkingStart { content_index: 0 })
+        ));
+        assert!(matches!(
+            out.get(2),
+            Some(StreamEvent::ThinkingDelta {
+                content_index: 0,
+                delta,
+            }) if delta == "Private chain of thought."
+        ));
+        assert!(matches!(
+            out.iter()
+                .find(|event| matches!(event, StreamEvent::ThinkingEnd { .. })),
+            Some(StreamEvent::ThinkingEnd {
+                content_index: 0,
+                content,
+            }) if content == "Private chain of thought."
+        ));
+    }
+
+    #[test]
+    fn test_stream_separates_reasoning_summary_and_reasoning_text_for_same_item() {
+        let events = vec![
+            json!({
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_same",
+                "summary_index": 0,
+                "delta": "summary"
+            }),
+            json!({
+                "type": "response.reasoning_text.delta",
+                "item_id": "rs_same",
+                "content_index": 0,
+                "delta": "full reasoning"
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "incomplete_details": null,
+                    "usage": {
+                        "input_tokens": 1,
+                        "output_tokens": 1,
+                        "total_tokens": 2
+                    }
+                }
+            }),
+        ];
+
+        let out = collect_events(&events);
+        let thinking_starts: Vec<usize> = out
+            .iter()
+            .filter_map(|event| match event {
+                StreamEvent::ThinkingStart { content_index } => Some(*content_index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thinking_starts, vec![0, 1]);
+
+        let thinking_deltas: Vec<(usize, String)> = out
+            .iter()
+            .filter_map(|event| match event {
+                StreamEvent::ThinkingDelta {
+                    content_index,
+                    delta,
+                } => Some((*content_index, delta.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            thinking_deltas,
+            vec![(0, "summary".to_string()), (1, "full reasoning".to_string())]
+        );
+
+        let thinking_ends: Vec<(usize, String)> = out
+            .iter()
+            .filter_map(|event| match event {
+                StreamEvent::ThinkingEnd {
+                    content_index,
+                    content,
+                } => Some((*content_index, content.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            thinking_ends,
+            vec![
+                (0, "summary".to_string()),
+                (1, "full reasoning".to_string())
+            ]
+        );
     }
 
     #[test]
