@@ -649,18 +649,20 @@ impl PackageManager {
                     &roots.global_base_dir,
                 );
 
-                Self::resolve_local_entries(
-                    project.entries_for(resource_type),
-                    resource_type,
-                    target,
-                    &PathMetadata {
-                        source: "local".to_string(),
-                        scope: PackageScope::Project,
-                        origin: ResourceOrigin::TopLevel,
-                        base_dir: Some(roots.project_base_dir.clone()),
-                    },
-                    &roots.project_base_dir,
-                );
+                if roots.project_settings_enabled {
+                    Self::resolve_local_entries(
+                        project.entries_for(resource_type),
+                        resource_type,
+                        target,
+                        &PathMetadata {
+                            source: "local".to_string(),
+                            scope: PackageScope::Project,
+                            origin: ResourceOrigin::TopLevel,
+                            base_dir: Some(roots.project_base_dir.clone()),
+                        },
+                        &roots.project_base_dir,
+                    );
+                }
             }
 
             // 3) Auto-discovered resources from standard dirs (global and project)
@@ -670,6 +672,7 @@ impl PackageManager {
                 &project,
                 &roots.global_base_dir,
                 &roots.project_base_dir,
+                roots.project_settings_enabled,
             );
 
             let resolved = accumulator.clone().into_resolved_paths();
@@ -1798,6 +1801,7 @@ impl PackageManager {
         project: &SettingsSnapshot,
         global_base_dir: &Path,
         project_base_dir: &Path,
+        project_settings_enabled: bool,
     ) {
         let user_metadata = PathMetadata {
             source: "auto".to_string(),
@@ -1840,27 +1844,30 @@ impl PackageManager {
                 target.add(path, &user_metadata, enabled);
             }
 
-            let (project_paths, project_overrides) = match resource_type {
-                ResourceType::Extensions => (
-                    collect_auto_extension_entries(&project_dirs.extensions),
-                    &project.extensions,
-                ),
-                ResourceType::Skills => (
-                    collect_auto_skill_entries(&project_dirs.skills),
-                    &project.skills,
-                ),
-                ResourceType::Prompts => (
-                    collect_auto_prompt_entries(&project_dirs.prompts),
-                    &project.prompts,
-                ),
-                ResourceType::Themes => (
-                    collect_auto_theme_entries(&project_dirs.themes),
-                    &project.themes,
-                ),
-            };
-            for path in project_paths {
-                let enabled = is_enabled_by_overrides(&path, project_overrides, project_base_dir);
-                target.add(path, &project_metadata, enabled);
+            if project_settings_enabled {
+                let (project_paths, project_overrides) = match resource_type {
+                    ResourceType::Extensions => (
+                        collect_auto_extension_entries(&project_dirs.extensions),
+                        &project.extensions,
+                    ),
+                    ResourceType::Skills => (
+                        collect_auto_skill_entries(&project_dirs.skills),
+                        &project.skills,
+                    ),
+                    ResourceType::Prompts => (
+                        collect_auto_prompt_entries(&project_dirs.prompts),
+                        &project.prompts,
+                    ),
+                    ResourceType::Themes => (
+                        collect_auto_theme_entries(&project_dirs.themes),
+                        &project.themes,
+                    ),
+                };
+                for path in project_paths {
+                    let enabled =
+                        is_enabled_by_overrides(&path, project_overrides, project_base_dir);
+                    target.add(path, &project_metadata, enabled);
+                }
             }
         }
     }
@@ -4003,6 +4010,7 @@ mod tests {
                 project_settings_path: project_settings_path.clone(),
                 global_base_dir: temp_dir.path().join("global-base"),
                 project_base_dir: project_root.join(".pi"),
+                project_settings_enabled: true,
             };
             fs::create_dir_all(&roots.global_base_dir).expect("create global base dir");
 
@@ -4030,6 +4038,146 @@ mod tests {
                     .extensions
                     .iter()
                     .all(|entry| entry.metadata.scope == PackageScope::Project)
+            );
+        });
+    }
+
+    #[test]
+    fn test_list_packages_with_override_roots_ignores_project_settings() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let project_root = temp_dir.path().join("project");
+        fs::create_dir_all(project_root.join(".pi")).expect("create project settings dir");
+
+        let override_settings_path = temp_dir.path().join("override-settings.json");
+        let project_settings_path = project_root.join(".pi/settings.json");
+
+        fs::write(
+            &override_settings_path,
+            serde_json::to_string_pretty(&json!({
+                "packages": ["npm:override-only"]
+            }))
+            .expect("serialize override settings"),
+        )
+        .expect("write override settings");
+        fs::write(
+            &project_settings_path,
+            serde_json::to_string_pretty(&json!({
+                "packages": ["npm:project-leak"]
+            }))
+            .expect("serialize project settings"),
+        )
+        .expect("write project settings");
+
+        let roots = ResolveRoots::from_override(&project_root, Some(override_settings_path));
+        let manager = PackageManager::new(project_root);
+        let packages = manager
+            .list_packages_with_roots(&roots)
+            .expect("list packages");
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].source, "npm:override-only");
+        assert_eq!(packages[0].scope, PackageScope::User);
+        assert!(
+            !roots.project_settings_enabled,
+            "full config override should disable project settings"
+        );
+    }
+
+    #[test]
+    fn test_config_override_roots_ignore_project_package_filters() {
+        run_async(async {
+            let temp_dir = tempfile::tempdir().expect("tempdir");
+            let project_root = temp_dir.path().join("project");
+            fs::create_dir_all(project_root.join(".pi")).expect("create project settings dir");
+            fs::create_dir_all(project_root.join(".pi/extensions"))
+                .expect("create project extension dir");
+
+            let package_root = temp_dir.path().join("pkg");
+            fs::create_dir_all(package_root.join("extensions")).expect("create extensions dir");
+            fs::write(package_root.join("extensions/a.native.json"), "{}")
+                .expect("write a.native.json");
+            fs::write(package_root.join("extensions/b.native.json"), "{}")
+                .expect("write b.native.json");
+            let project_local_extension =
+                project_root.join(".pi/extensions/project-local.native.json");
+            let project_auto_extension =
+                project_root.join(".pi/extensions/project-auto.native.json");
+            fs::write(&project_local_extension, "{}").expect("write project local extension");
+            fs::write(&project_auto_extension, "{}").expect("write project auto extension");
+
+            let override_settings_path = temp_dir.path().join("override-settings.json");
+            let project_settings_path = project_root.join(".pi/settings.json");
+
+            let override_settings = json!({
+                "packages": [{
+                    "source": package_root.to_string_lossy(),
+                    "extensions": ["extensions/a.native.json"]
+                }]
+            });
+            fs::write(
+                &override_settings_path,
+                serde_json::to_string_pretty(&override_settings)
+                    .expect("serialize override settings"),
+            )
+            .expect("write override settings");
+
+            let project_settings = json!({
+                "extensions": ["extensions/project-local.native.json"],
+                "packages": [{
+                    "source": package_root.to_string_lossy(),
+                    "extensions": ["extensions/b.native.json"]
+                }]
+            });
+            fs::write(
+                &project_settings_path,
+                serde_json::to_string_pretty(&project_settings)
+                    .expect("serialize project settings"),
+            )
+            .expect("write project settings");
+
+            let roots = ResolveRoots {
+                global_settings_path: override_settings_path.clone(),
+                project_settings_path: project_settings_path.clone(),
+                global_base_dir: temp_dir.path().join("global-base"),
+                project_base_dir: project_root.join(".pi"),
+                project_settings_enabled: false,
+            };
+            fs::create_dir_all(&roots.global_base_dir).expect("create global base dir");
+
+            let manager = PackageManager::new(project_root);
+            let resolved = manager.resolve_with_roots(&roots).await.expect("resolve");
+
+            let enabled_extensions = resolved
+                .extensions
+                .iter()
+                .filter(|entry| entry.enabled)
+                .collect::<Vec<_>>();
+            assert_eq!(enabled_extensions.len(), 1);
+            assert_eq!(
+                enabled_extensions[0].path,
+                package_root.join("extensions/a.native.json")
+            );
+            assert_eq!(enabled_extensions[0].metadata.scope, PackageScope::User);
+            assert!(
+                resolved
+                    .extensions
+                    .iter()
+                    .all(|entry| entry.path != package_root.join("extensions/b.native.json")),
+                "project package resources should be ignored when a full config override is active"
+            );
+            assert!(
+                resolved
+                    .extensions
+                    .iter()
+                    .all(|entry| entry.path != project_local_extension),
+                "project local settings entries should be ignored when a full config override is active"
+            );
+            assert!(
+                resolved
+                    .extensions
+                    .iter()
+                    .all(|entry| entry.path != project_auto_extension),
+                "project auto-discovered resources should be ignored when a full config override is active"
             );
         });
     }
