@@ -667,12 +667,9 @@ fn ts_load_spec_with_package_json() {
     write_jsonl_artifacts(&harness);
 }
 
-#[test]
-fn ts_package_manifest_loads_doom_style_helper_out_of_box() {
-    let harness =
-        common::TestHarness::new("ts_package_manifest_loads_doom_style_helper_out_of_box");
-    let cwd = harness.temp_dir().to_path_buf();
-
+fn create_doom_like_package(
+    harness: &common::TestHarness,
+) -> (std::path::PathBuf, std::path::PathBuf) {
     let package_json = br#"{
   "name": "doom-like-ext",
   "version": "0.1.0",
@@ -704,6 +701,15 @@ export default function init(pi: any): void {
     harness.record_artifact("doom-like-ext/package.json", &package_json_path);
     harness.record_artifact("doom-like-ext/index.ts", &entry_path);
     harness.record_artifact("doom-like-ext/wad-finder.ts", &helper_path);
+    (package_root, entry_path)
+}
+
+#[test]
+fn ts_package_manifest_loads_doom_style_helper_out_of_box() {
+    let harness =
+        common::TestHarness::new("ts_package_manifest_loads_doom_style_helper_out_of_box");
+    let cwd = harness.temp_dir().to_path_buf();
+    let (package_root, entry_path) = create_doom_like_package(&harness);
 
     let resolved = common::run_async({
         let package_manager = PackageManager::new(cwd.clone());
