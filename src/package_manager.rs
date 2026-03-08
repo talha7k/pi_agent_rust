@@ -106,8 +106,10 @@ pub struct ResolveRoots {
 impl ResolveRoots {
     fn from_override(cwd: &Path, config_override_path: Option<&Path>) -> Self {
         Self {
-            global_settings_path: config_override_path
-                .map_or_else(|| Config::global_dir().join("settings.json"), std::path::Path::to_path_buf),
+            global_settings_path: config_override_path.map_or_else(
+                || Config::global_dir().join("settings.json"),
+                std::path::Path::to_path_buf,
+            ),
             project_settings_path: project_settings_path(cwd),
             global_base_dir: Config::global_dir(),
             project_base_dir: cwd.join(Config::project_dir()),
@@ -600,9 +602,11 @@ impl PackageManager {
                     scope: PackageScope::User,
                 }));
                 if roots_for_setup.project_settings_enabled {
-                    all_packages.extend(project.packages.iter().cloned().map(|pkg| ScopedPackage {
-                        pkg,
-                        scope: PackageScope::Project,
+                    all_packages.extend(project.packages.iter().cloned().map(|pkg| {
+                        ScopedPackage {
+                            pkg,
+                            scope: PackageScope::Project,
+                        }
                     }));
                 }
                 let package_sources = this_for_setup.dedupe_packages(all_packages);
@@ -4074,8 +4078,7 @@ mod tests {
 
         let roots = ResolveRoots::from_override(&project_root, Some(&override_settings_path));
         let manager = PackageManager::new(project_root);
-        let packages = PackageManager::list_packages_with_roots(&roots)
-            .expect("list packages");
+        let packages = PackageManager::list_packages_with_roots(&roots).expect("list packages");
 
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].source, "npm:override-only");
@@ -4099,7 +4102,7 @@ mod tests {
             fs::create_dir_all(package_root.join("extensions")).expect("create extensions dir");
             fs::write(package_root.join("extensions/a.native.json"), "{}")
                 .expect("write a.native.json");
-                
+
             let package_root2 = temp_dir.path().join("pkg2");
             fs::create_dir_all(package_root2.join("extensions")).expect("create extensions dir");
             fs::write(package_root2.join("extensions/b.native.json"), "{}")
@@ -5923,8 +5926,14 @@ mod tests {
         // Case 4: SCP-like path with traversal segments must be sanitized
         let (_, host, path) = normalize_remote_git_repo("git@evil.com:../../etc/passwd");
         assert_eq!(host, "evil.com");
-        assert_eq!(path, "etc/passwd", "dot-dot segments must be stripped from SCP-like paths");
-        assert!(!path.contains(".."), "path must not contain traversal segments");
+        assert_eq!(
+            path, "etc/passwd",
+            "dot-dot segments must be stripped from SCP-like paths"
+        );
+        assert!(
+            !path.contains(".."),
+            "path must not contain traversal segments"
+        );
 
         // Case 5: SCP-like path with single traversal
         let (_, _, path) = normalize_remote_git_repo("git@github.com:../user/repo");

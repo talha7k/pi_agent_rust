@@ -103,9 +103,7 @@ impl SseParser {
             "response.function_call_arguments.delta" => {
                 Cow::Borrowed("response.function_call_arguments.delta")
             }
-            "response.reasoning_text.delta" => {
-                Cow::Borrowed("response.reasoning_text.delta")
-            }
+            "response.reasoning_text.delta" => Cow::Borrowed("response.reasoning_text.delta"),
             "response.reasoning_text.done" => Cow::Borrowed("response.reasoning_text.done"),
             "response.reasoning_summary_text.delta" => {
                 Cow::Borrowed("response.reasoning_summary_text.delta")
