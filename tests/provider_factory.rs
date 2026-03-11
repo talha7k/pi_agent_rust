@@ -327,7 +327,7 @@ fn provider_base_strategy() -> impl Strategy<Value = String> {
 fn normalize_openai_base_appends_for_plain_host() {
     let harness = TestHarness::new("normalize_openai_base_appends_for_plain_host");
     let input = "https://api.openai.com";
-    let expected = "https://api.openai.com/chat/completions";
+    let expected = "https://api.openai.com/v1/chat/completions";
     harness.log().info_ctx("normalize", "plain host", |ctx| {
         ctx.push(("input".to_string(), input.to_string()));
         ctx.push(("expected".to_string(), expected.to_string()));

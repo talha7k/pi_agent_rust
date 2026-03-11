@@ -4786,12 +4786,15 @@ async fn get_file_lines_async<'a>(
     cache: &'a mut HashMap<PathBuf, Vec<String>>,
 ) -> &'a [String] {
     if !cache.contains_key(path) {
-        // Prevent OOM on huge files: skip reading if > 10MB
+        // Prevent OOM on huge files and hangs on pipes
         if let Ok(meta) = asupersync::fs::metadata(path).await {
-            if meta.len() > 10 * 1024 * 1024 {
+            if !meta.is_file() || meta.len() > 10 * 1024 * 1024 {
                 cache.insert(path.to_path_buf(), Vec::new());
                 return &[];
             }
+        } else {
+            cache.insert(path.to_path_buf(), Vec::new());
+            return &[];
         }
 
         // Match Node's `readFileSync(..., "utf-8")` behavior: decode lossily rather than failing.
