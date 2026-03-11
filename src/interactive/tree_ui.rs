@@ -187,8 +187,10 @@ impl PiApp {
             KeyType::Runes if key.runes == ['j'] => picker.select_next(),
             KeyType::Enter => {
                 if let Some(branch) = picker.selected_branch().cloned() {
-                    self.branch_picker = None;
-                    return self.switch_to_branch_leaf(&branch.leaf_id);
+                    if self.switch_to_branch_leaf(&branch.leaf_id) {
+                        self.branch_picker = None;
+                    }
+                    return None;
                 }
                 self.branch_picker = None;
             }
@@ -206,13 +208,14 @@ impl PiApp {
     }
 
     /// Switch the active branch to a different leaf. Reloads the conversation.
-    fn switch_to_branch_leaf(&mut self, leaf_id: &str) -> Option<Cmd> {
-        let (session_id, old_leaf_id) = self
-            .session
-            .try_lock()
-            .ok()
-            .map(|g| (g.header.id.clone(), g.leaf_id.clone()))
-            .unwrap_or_default();
+    fn switch_to_branch_leaf(&mut self, leaf_id: &str) -> bool {
+        let Ok(session_guard) = self.session.try_lock() else {
+            self.status_message = Some("Session busy; try again".to_string());
+            return false;
+        };
+        let session_id = session_guard.header.id.clone();
+        let old_leaf_id = session_guard.leaf_id.clone();
+        drop(session_guard);
 
         let pending = PendingTreeNavigation {
             session_id,
@@ -225,7 +228,7 @@ impl PiApp {
             api_key_present: false,
         };
         self.start_tree_navigation(pending, TreeSummaryChoice::NoSummary, None);
-        None
+        true
     }
 
     /// Open the branch picker if the session has sibling branches.
@@ -235,11 +238,12 @@ impl PiApp {
             return;
         }
 
-        let branches = self
-            .session
-            .try_lock()
-            .ok()
-            .and_then(|guard| guard.sibling_branches().map(|(_, b)| b));
+        let Ok(session_guard) = self.session.try_lock() else {
+            self.status_message = Some("Session busy; try again".to_string());
+            return;
+        };
+        let branches = session_guard.sibling_branches().map(|(_, b)| b);
+        drop(session_guard);
 
         match branches {
             Some(branches) if branches.len() > 1 => {
@@ -261,8 +265,11 @@ impl PiApp {
             return;
         }
 
-        let target = self.session.try_lock().ok().and_then(|guard| {
-            let (_, branches) = guard.sibling_branches()?;
+        let Ok(session_guard) = self.session.try_lock() else {
+            self.status_message = Some("Session busy; try again".to_string());
+            return;
+        };
+        let target = session_guard.sibling_branches().and_then(|(_, branches)| {
             if branches.len() <= 1 {
                 return None;
             }
@@ -274,6 +281,7 @@ impl PiApp {
             };
             Some(branches[next_idx].leaf_id.clone())
         });
+        drop(session_guard);
 
         if let Some(leaf_id) = target {
             self.switch_to_branch_leaf(&leaf_id);

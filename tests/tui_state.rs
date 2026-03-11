@@ -5148,6 +5148,25 @@ fn tui_grad_branch_picker_opens_with_branches() {
 }
 
 #[test]
+fn tui_grad_branch_picker_busy_session_shows_busy_message() {
+    let harness = TestHarness::new("tui_grad_branch_picker_busy_session_shows_busy_message");
+    let (session, _, _, _) = create_two_branch_session();
+    let (mut app, _rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
+    log_initial_state(&harness, &app);
+
+    let session_handle = app.session_handle();
+    let _guard = session_handle.try_lock().expect("session lock");
+
+    app.open_branch_picker();
+
+    assert_eq!(app.status_message(), Some("Session busy; try again"));
+    assert!(
+        !app.has_branch_picker(),
+        "Picker should stay closed while busy"
+    );
+}
+
+#[test]
 fn tui_grad_branch_picker_escape_closes() {
     let harness = TestHarness::new("tui_grad_branch_picker_escape_closes");
     let (session, _, _, _) = create_two_branch_session();
@@ -5194,6 +5213,30 @@ fn tui_grad_branch_picker_navigation_up_down() {
 }
 
 #[test]
+fn tui_grad_branch_picker_enter_while_session_busy_keeps_picker_open() {
+    let harness =
+        TestHarness::new("tui_grad_branch_picker_enter_while_session_busy_keeps_picker_open");
+    let (session, _, _, _) = create_two_branch_session();
+    let (mut app, _rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
+    log_initial_state(&harness, &app);
+
+    app.open_branch_picker();
+    assert!(app.has_branch_picker());
+    app.handle_branch_picker_key(&KeyMsg::from_type(KeyType::Down));
+
+    let session_handle = app.session_handle();
+    let _guard = session_handle.try_lock().expect("session lock");
+
+    app.handle_branch_picker_key(&KeyMsg::from_type(KeyType::Enter));
+
+    assert_eq!(app.status_message(), Some("Session busy; try again"));
+    assert!(
+        app.has_branch_picker(),
+        "Picker should remain open when branch switch cannot start"
+    );
+}
+
+#[test]
 fn tui_grad_branch_picker_enter_switches_branch() {
     let harness = TestHarness::new("tui_grad_branch_picker_enter_switches_branch");
     let (session, _, _, _) = create_two_branch_session();
@@ -5228,6 +5271,21 @@ fn tui_grad_cycle_sibling_forward_with_branches() {
         !msg.contains("No sibling branches"),
         "Expected successful branch cycle, got status: {msg}"
     );
+}
+
+#[test]
+fn tui_grad_cycle_sibling_branch_busy_session_shows_busy_message() {
+    let harness = TestHarness::new("tui_grad_cycle_sibling_branch_busy_session_shows_busy_message");
+    let (session, _, _, _) = create_two_branch_session();
+    let (mut app, _rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
+    log_initial_state(&harness, &app);
+
+    let session_handle = app.session_handle();
+    let _guard = session_handle.try_lock().expect("session lock");
+
+    app.cycle_sibling_branch(true);
+
+    assert_eq!(app.status_message(), Some("Session busy; try again"));
 }
 
 #[test]
