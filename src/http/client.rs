@@ -277,7 +277,7 @@ async fn send_parts(
     transport.flush().await?;
 
     let (status, response_headers, leftover) = Box::pin(read_response_head(&mut transport)).await?;
-    let body_kind = body_kind_from_headers(&response_headers);
+    let body_kind = body_kind_from_response(status, &response_headers);
 
     let state = BodyStreamState::new(transport, body_kind, leftover);
     let stream = stream::try_unfold(state, |mut state| async move {
@@ -572,6 +572,13 @@ enum BodyKind {
     ContentLength(usize),
     Chunked,
     Eof,
+}
+
+fn body_kind_from_response(status: u16, headers: &[(String, String)]) -> BodyKind {
+    if matches!(status, 100..=199 | 204 | 205 | 304) {
+        return BodyKind::Empty;
+    }
+    body_kind_from_headers(headers)
 }
 
 fn body_kind_from_headers(headers: &[(String, String)]) -> BodyKind {
@@ -1108,6 +1115,33 @@ mod tests {
         assert!(matches!(
             body_kind_from_headers(&headers),
             BodyKind::ContentLength(10)
+        ));
+    }
+
+    #[test]
+    fn body_kind_response_204_without_headers_is_empty() {
+        let headers: Vec<(String, String)> = Vec::new();
+        assert!(matches!(
+            body_kind_from_response(204, &headers),
+            BodyKind::Empty
+        ));
+    }
+
+    #[test]
+    fn body_kind_response_304_ignores_content_length() {
+        let headers = vec![("Content-Length".to_string(), "7".to_string())];
+        assert!(matches!(
+            body_kind_from_response(304, &headers),
+            BodyKind::Empty
+        ));
+    }
+
+    #[test]
+    fn body_kind_response_205_without_headers_is_empty() {
+        let headers: Vec<(String, String)> = Vec::new();
+        assert!(matches!(
+            body_kind_from_response(205, &headers),
+            BodyKind::Empty
         ));
     }
 

@@ -203,6 +203,42 @@ fn response_streams_chunked_body() {
 }
 
 #[test]
+fn response_204_without_content_length_returns_empty_body_without_waiting_for_close() {
+    let harness = TestHarness::new(
+        "http_client_response_204_without_content_length_returns_empty_body_without_waiting_for_close",
+    );
+
+    let server = OneShotServer::start(|mut stream, _request| {
+        let response = concat!(
+            "HTTP/1.1 204 No Content\r\n",
+            "Connection: keep-alive\r\n",
+            "\r\n"
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+        stream.flush().expect("flush response");
+        thread::sleep(Duration::from_millis(150));
+    });
+
+    let url = server.url("/no-content");
+    let body = common::run_async(async move {
+        let response = Client::new()
+            .get(&url)
+            .timeout(Duration::from_millis(30))
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(response.status(), 204);
+        response.text().await.expect("empty text")
+    });
+
+    server.join();
+    assert_eq!(body, "");
+    write_logs_artifact(&harness);
+}
+
+#[test]
 fn malformed_header_line_is_error() {
     let harness = TestHarness::new("http_client_malformed_header_line_is_error");
 
