@@ -3438,6 +3438,73 @@ mod retry_tests {
             );
         });
     }
+
+    #[test]
+    fn rpc_spill_file_abandon_clears_path_and_unlinks_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let spill_path = tmp.path().join("partial-rpc-bash.log");
+        std::fs::write(&spill_path, b"partial output").expect("write spill file");
+
+        let mut temp_file = None;
+        let mut temp_file_path = Some(spill_path.clone());
+        let mut spill_failed = false;
+
+        abandon_bash_rpc_spill_file(&mut temp_file, &mut temp_file_path, &mut spill_failed);
+
+        assert!(spill_failed);
+        assert!(temp_file.is_none());
+        assert!(temp_file_path.is_none());
+        assert!(
+            !spill_path.exists(),
+            "abandoned RPC spill files should not be left behind"
+        );
+    }
+
+    #[test]
+    fn rpc_spill_file_hard_limit_abandons_partial_spill_file() {
+        asupersync::test_utils::run_test(|| async {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let spill_path = tmp.path().join("hard-limit-rpc-bash.log");
+            std::fs::write(&spill_path, b"partial output").expect("write spill file");
+
+            let spill_file = asupersync::fs::OpenOptions::new()
+                .append(true)
+                .open(&spill_path)
+                .await
+                .expect("open spill file");
+
+            let mut chunks = VecDeque::new();
+            let mut chunks_bytes = 0usize;
+            let mut total_bytes = crate::tools::BASH_FILE_LIMIT_BYTES;
+            let mut total_lines = 0usize;
+            let mut last_byte_was_newline = false;
+            let mut temp_file = Some(spill_file);
+            let mut temp_file_path = Some(spill_path.clone());
+            let mut spill_failed = false;
+
+            ingest_bash_rpc_chunk(
+                vec![b'x'],
+                &mut chunks,
+                &mut chunks_bytes,
+                &mut total_bytes,
+                &mut total_lines,
+                &mut last_byte_was_newline,
+                &mut temp_file,
+                &mut temp_file_path,
+                &mut spill_failed,
+                DEFAULT_MAX_BYTES,
+            )
+            .await;
+
+            assert!(spill_failed);
+            assert!(temp_file.is_none());
+            assert!(temp_file_path.is_none());
+            assert!(
+                !spill_path.exists(),
+                "hard-limit RPC spill files must be discarded"
+            );
+        });
+    }
 }
 
 fn should_auto_compact(tokens_before: u64, context_window: u32, reserve_tokens: u32) -> bool {
@@ -3935,6 +4002,26 @@ struct BashRpcResult {
     full_output_path: Option<String>,
 }
 
+fn abandon_bash_rpc_spill_file(
+    temp_file: &mut Option<asupersync::fs::File>,
+    temp_file_path: &mut Option<PathBuf>,
+    spill_failed: &mut bool,
+) {
+    *spill_failed = true;
+    *temp_file = None;
+    if let Some(path) = temp_file_path.take() {
+        if let Err(e) = std::fs::remove_file(&path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::debug!(
+                "Failed to remove incomplete RPC bash spill file {}: {}",
+                path.display(),
+                e
+            );
+        }
+    }
+}
+
 const fn line_count_from_newline_count(
     total_bytes: usize,
     newline_count: usize,
@@ -4035,28 +4122,30 @@ async fn ingest_bash_rpc_chunk(
 
                     if identity_match {
                         // Flush existing chunks to the new file
+                        let mut failed_flush = false;
                         for existing in chunks.iter() {
                             use asupersync::io::AsyncWriteExt;
                             if let Err(e) = file.write_all(existing).await {
                                 tracing::warn!("Failed to flush bash chunk to temp file: {e}");
-                                *spill_failed = true;
+                                failed_flush = true;
                                 break;
                             }
                         }
-                        if !*spill_failed {
+                        *temp_file_path = Some(path);
+                        if failed_flush {
+                            abandon_bash_rpc_spill_file(temp_file, temp_file_path, spill_failed);
+                        } else {
                             *temp_file = Some(file);
-                            *temp_file_path = Some(path);
                         }
                     } else {
-                        let _ = std::fs::remove_file(&path);
-                        *spill_failed = true;
+                        *temp_file_path = Some(path);
+                        abandon_bash_rpc_spill_file(temp_file, temp_file_path, spill_failed);
                     }
                 }
                 Err(e) => {
                     tracing::warn!("Failed to reopen bash temp file async: {e}");
-                    // Clean up the empty file we just created
-                    let _ = std::fs::remove_file(&path);
-                    *spill_failed = true;
+                    *temp_file_path = Some(path);
+                    abandon_bash_rpc_spill_file(temp_file, temp_file_path, spill_failed);
                 }
             }
         } else {
@@ -4065,22 +4154,24 @@ async fn ingest_bash_rpc_chunk(
     }
 
     // Write new chunk to file if we have one
+    let mut abandon_spill_file = false;
     if let Some(file) = temp_file.as_mut() {
         if *total_bytes <= crate::tools::BASH_FILE_LIMIT_BYTES {
             use asupersync::io::AsyncWriteExt;
             if let Err(e) = file.write_all(&bytes).await {
                 tracing::warn!("Failed to write bash chunk to temp file: {e}");
-                *spill_failed = true;
-                *temp_file = None;
+                abandon_spill_file = true;
             }
         } else {
             // Hard limit reached. Stop writing and close the file to release the FD.
             if !*spill_failed {
                 tracing::warn!("Bash output exceeded hard limit; stopping file log");
-                *spill_failed = true;
-                *temp_file = None;
+                abandon_spill_file = true;
             }
         }
+    }
+    if abandon_spill_file {
+        abandon_bash_rpc_spill_file(temp_file, temp_file_path, spill_failed);
     }
 
     // Update memory buffer

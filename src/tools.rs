@@ -4539,22 +4539,21 @@ async fn ingest_bash_chunk(chunk: Vec<u8>, state: &mut BashOutputState) -> Resul
                             }
                         }
 
+                        state.temp_file_path = Some(path);
                         if failed_flush {
-                            state.spill_failed = true;
-                            let _ = std::fs::remove_file(&path);
+                            state.abandon_spill_file();
                         } else {
-                            state.temp_file_path = Some(path);
                             state.temp_file = Some(file);
                         }
                     } else {
-                        state.spill_failed = true;
-                        let _ = std::fs::remove_file(&path);
+                        state.temp_file_path = Some(path);
+                        state.abandon_spill_file();
                     }
                 }
                 Err(e) => {
                     tracing::warn!("Failed to open temp file async: {e}");
-                    state.spill_failed = true;
-                    let _ = std::fs::remove_file(&path);
+                    state.temp_file_path = Some(path);
+                    state.abandon_spill_file();
                 }
             }
         } else {
