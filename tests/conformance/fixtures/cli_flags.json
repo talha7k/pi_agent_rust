@@ -12,7 +12,7 @@
           "print": false,
           "no_session": false,
           "no_tools": false,
-          "tools": "read,bash,edit,write,hashline_edit",
+          "tools": "read,bash,edit,write,grep,find,ls,hashline_edit",
           "no_extensions": false,
           "no_skills": false,
           "no_prompt_templates": false,

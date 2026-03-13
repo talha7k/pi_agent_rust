@@ -3232,12 +3232,21 @@ fn e2e_cli_specific_tools_enables_subset() {
     assert_contains(&harness.harness, &result.stdout, "tools");
 }
 
-/// Default tools (read,bash,edit,write) should be enabled when no --tools/--no-tools flag.
+/// Default built-in tools should be enabled when no --tools/--no-tools flag.
 #[test]
 fn e2e_cli_default_tools_when_no_flag() {
     let mut harness = CliTestHarness::new("e2e_cli_default_tools_when_no_flag");
     let system_prompt = "Test default tools.";
-    let expected_tools = ["read", "bash", "edit", "write", "hashline_edit"];
+    let expected_tools = [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+        "hashline_edit",
+    ];
 
     let request_body = json!({
         "model": "claude-sonnet-4-5",
