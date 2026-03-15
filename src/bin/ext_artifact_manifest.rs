@@ -238,7 +238,7 @@ fn collect_nested_package_json_paths(
         .with_context(|| format!("read directory {}", dir.display()))?
         .collect::<std::io::Result<Vec<_>>>()
         .with_context(|| format!("read directory entries {}", dir.display()))?;
-    entries.sort_by_key(|entry| entry.path());
+    entries.sort_by_key(std::fs::DirEntry::path);
 
     for entry in entries {
         let path = entry.path();
