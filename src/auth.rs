@@ -3493,6 +3493,7 @@ pub async fn complete_gitlab_oauth(
     config: &GitLabOAuthConfig,
     code_input: &str,
     verifier: &str,
+    redirect_uri: Option<&str>,
 ) -> Result<AuthCredential> {
     let (code, state) = parse_oauth_code_input(code_input);
 
@@ -3520,8 +3521,8 @@ pub async fn complete_gitlab_oauth(
         "code_verifier": verifier,
     });
 
-    if let Some(ref redirect_uri) = config.redirect_uri {
-        body["redirect_uri"] = serde_json::Value::String(redirect_uri.clone());
+    if let Some(uri) = redirect_uri {
+        body["redirect_uri"] = serde_json::Value::String(uri.to_string());
     }
 
     let request = client
@@ -4386,7 +4387,7 @@ mod tests {
         let rt = asupersync::runtime::RuntimeBuilder::current_thread().build();
         rt.expect("runtime").block_on(async {
             let config = GitLabOAuthConfig::default();
-            let err = complete_gitlab_oauth(&config, "abc#mismatch", "expected")
+            let err = complete_gitlab_oauth(&config, "abc#mismatch", "expected", None)
                 .await
                 .unwrap_err();
             assert!(err.to_string().contains("State mismatch"));

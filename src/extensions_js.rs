@@ -8220,10 +8220,10 @@ export default { v1, v3, v4, v5, v7, validate, version };
 export function createTwoFilesPatch(oldFile, newFile, oldStr, newStr, _oldHeader, _newHeader, _opts) {
   const oldLines = String(oldStr ?? "").split("\n");
   const newLines = String(newStr ?? "").split("\n");
-  let patch = `--- ${oldFile}\n+++ ${newFile}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n`;
-  for (const line of oldLines) patch += `-${line}\n`;
-  for (const line of newLines) patch += `+${line}\n`;
-  return patch;
+  let patch = [`--- ${oldFile}`, `+++ ${newFile}`, `@@ -1,${oldLines.length} +1,${newLines.length} @@`];
+  for (const line of oldLines) patch.push(`-${line}`);
+  for (const line of newLines) patch.push(`+${line}`);
+  return patch.join('\n') + '\n';
 }
 export function createPatch(fileName, oldStr, newStr, oldH, newH, opts) {
   return createTwoFilesPatch(fileName, fileName, oldStr, newStr, oldH, newH, opts);
@@ -8823,22 +8823,24 @@ function __normalizeExecOptions(raw) {
 }
 
 function __wrapExecLike(commandForError, child, opts, callback) {
-  let stdout = "";
-  let stderr = "";
+  let stdoutChunks = [];
+  let stderrChunks = [];
   let callbackDone = false;
-  const finish = (err, out, errOut) => {
+  const finish = (err) => {
     if (callbackDone) return;
     callbackDone = true;
+    const out = stdoutChunks.join("");
+    const errOut = stderrChunks.join("");
     if (typeof callback === "function") {
       callback(err, out, errOut);
     }
   };
 
   child.stdout?.on("data", (chunk) => {
-    stdout += String(chunk ?? "");
+    stdoutChunks.push(String(chunk ?? ""));
   });
   child.stderr?.on("data", (chunk) => {
-    stderr += String(chunk ?? "");
+    stderrChunks.push(String(chunk ?? ""));
   });
 
   child.on("error", (error) => {
@@ -14468,8 +14470,12 @@ impl<C: SchedulerClock + 'static> PiJsRuntime<C> {
                                 input_len = text.len(),
                                 "crypto sha256"
                             );
+                            let mut bytes = Vec::with_capacity(text.len());
+                            for ch in text.chars() {
+                                bytes.push(ch as u8);
+                            }
                             let mut hasher = Sha256::new();
-                            hasher.update(text.as_bytes());
+                            hasher.update(&bytes);
                             let digest = hasher.finalize();
                             Ok(hex_lower(&digest))
                         },
@@ -17614,9 +17620,11 @@ if (typeof globalThis.Buffer === 'undefined') {
                 return __pi_base64_encode_native(binary);
             }
             if (enc === 'hex') {
-                let hex = '';
-                for (let i = 0; i < view.length; i++) hex += (view[i] < 16 ? '0' : '') + view[i].toString(16);
-                return hex;
+                const hexArr = new Array(view.length);
+                for (let i = 0; i < view.length; i++) {
+                    hexArr[i] = (view[i] < 16 ? '0' : '') + view[i].toString(16);
+                }
+                return hexArr.join('');
             }
             return new TextDecoder().decode(view);
         }
@@ -18148,17 +18156,17 @@ if (typeof globalThis.Bun === 'undefined') {
         const childProcess = __pi_bun_child_process();
         if (childProcess && typeof childProcess.spawn === 'function') {
             const child = childProcess.spawn(command, args, spawnOptions);
-            let stdoutText = '';
-            let stderrText = '';
+            let stdoutChunks = [];
+            let stderrChunks = [];
 
             if (child && child.stdout && typeof child.stdout.on === 'function') {
                 child.stdout.on('data', (chunk) => {
-                    stdoutText += String(chunk ?? '');
+                    stdoutChunks.push(String(chunk ?? ''));
                 });
             }
             if (child && child.stderr && typeof child.stderr.on === 'function') {
                 child.stderr.on('data', (chunk) => {
-                    stderrText += String(chunk ?? '');
+                    stderrChunks.push(String(chunk ?? ''));
                 });
             }
 
@@ -18181,11 +18189,11 @@ if (typeof globalThis.Bun === 'undefined') {
                 stdin: child.stdin || null,
                 stdout: __pi_bun_make_text_stream(async () => {
                     await exited.catch(() => null);
-                    return stdoutText;
+                    return stdoutChunks.join('');
                 }),
                 stderr: __pi_bun_make_text_stream(async () => {
                     await exited.catch(() => null);
-                    return stderrText;
+                    return stderrChunks.join('');
                 }),
                 exited,
                 kill(signal) {

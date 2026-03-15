@@ -245,6 +245,60 @@ fn startup_init_cmd_sequences_window_size_before_pending() {
 }
 
 #[test]
+fn oauth_device_flow_started_sets_pending_device_flow_state_and_prompt() {
+    let mut app = build_test_app_with_config(Config::default());
+    app.status_message = Some("Starting Kimi Code login...".to_string());
+    app.input_mode = InputMode::MultiLine;
+
+    let _ = bubbletea::Model::update(
+        &mut app,
+        bubbletea::Message::new(PiMsg::OAuthDeviceFlowStarted {
+            provider: "kimi-for-coding".to_string(),
+            device_code: "device-code-123".to_string(),
+            user_code: "user-code-456".to_string(),
+            verification_uri: "https://kimi.example/device".to_string(),
+            expires_in: 900,
+        }),
+    );
+
+    let pending = app.pending_oauth.as_ref().expect("pending device flow");
+    assert_eq!(pending.provider, "kimi-for-coding");
+    assert_eq!(pending.kind, PendingLoginKind::DeviceFlow);
+    assert_eq!(pending.verifier, "");
+    assert!(pending.oauth_config.is_none());
+    assert_eq!(pending.device_code.as_deref(), Some("device-code-123"));
+    assert!(pending.redirect_uri.is_none());
+
+    assert_eq!(app.input_mode, InputMode::SingleLine);
+    assert!(app.status_message.is_none());
+
+    let last_message = app.messages.last().expect("oauth instructions message");
+    assert_eq!(last_message.role, MessageRole::System);
+    assert!(last_message.thinking.is_none());
+    assert!(!last_message.collapsed);
+    assert!(
+        last_message
+            .content
+            .contains("Open this URL:\nhttps://kimi.example/device")
+    );
+    assert!(
+        last_message
+            .content
+            .contains("If prompted, enter this code: user-code-456")
+    );
+    assert!(
+        last_message
+            .content
+            .contains("Code expires in 900 seconds.")
+    );
+    assert!(
+        last_message
+            .content
+            .contains("press Enter in Pi to complete login")
+    );
+}
+
+#[test]
 fn enqueue_ui_shutdown_waits_for_capacity_in_full_channel() {
     asupersync::test_utils::run_test(|| async {
         let (event_tx, event_rx) = mpsc::channel(1);
