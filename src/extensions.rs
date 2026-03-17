@@ -5713,10 +5713,10 @@ pub fn emit_security_alert(manager: &ExtensionManager, alert: SecurityAlert) {
     match alert.severity {
         SecurityAlertSeverity::Critical => {
             tracing::error!(
-                category = %serde_json::to_string(&alert.category).unwrap_or_default(),
+                category = %serde_json::to_string(&alert.category).unwrap_or_else(|_| format!("{:?}", alert.category)),
                 extension_id = %alert.extension_id,
                 capability = %alert.capability,
-                action = %serde_json::to_string(&alert.action).unwrap_or_default(),
+                action = %serde_json::to_string(&alert.action).unwrap_or_else(|_| format!("{:?}", alert.action)),
                 risk_score = alert.risk_score,
                 "SECURITY ALERT: {}",
                 alert.summary
@@ -5724,17 +5724,17 @@ pub fn emit_security_alert(manager: &ExtensionManager, alert: SecurityAlert) {
         }
         SecurityAlertSeverity::Error => {
             tracing::warn!(
-                category = %serde_json::to_string(&alert.category).unwrap_or_default(),
+                category = %serde_json::to_string(&alert.category).unwrap_or_else(|_| format!("{:?}", alert.category)),
                 extension_id = %alert.extension_id,
                 capability = %alert.capability,
-                action = %serde_json::to_string(&alert.action).unwrap_or_default(),
+                action = %serde_json::to_string(&alert.action).unwrap_or_else(|_| format!("{:?}", alert.action)),
                 "Security alert: {}",
                 alert.summary
             );
         }
         SecurityAlertSeverity::Warning => {
             tracing::info!(
-                category = %serde_json::to_string(&alert.category).unwrap_or_default(),
+                category = %serde_json::to_string(&alert.category).unwrap_or_else(|_| format!("{:?}", alert.category)),
                 extension_id = %alert.extension_id,
                 capability = %alert.capability,
                 "Security notice: {}",

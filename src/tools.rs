@@ -4968,7 +4968,7 @@ static HASHLINE_TAG_RE: OnceLock<regex::Regex> = OnceLock::new();
 
 fn hashline_tag_regex() -> &'static regex::Regex {
     HASHLINE_TAG_RE.get_or_init(|| {
-        regex::Regex::new(r"^[\s>+\-]*(\d+)\s*#\s*([ZPMQVRWSNKTXJBYH]{2})").unwrap()
+        regex::Regex::new(r"^[\s>+\-]*(\d+)\s*#\s*([ZPMQVRWSNKTXJBYH]{2})").expect("valid hashline regex")
     })
 }
 
@@ -4994,7 +4994,7 @@ static HASHLINE_PREFIX_RE: OnceLock<regex::Regex> = OnceLock::new();
 
 fn strip_hashline_prefix(line: &str) -> &str {
     let re = HASHLINE_PREFIX_RE
-        .get_or_init(|| regex::Regex::new(r"^\d+#[ZPMQVRWSNKTXJBYH]{2}:").unwrap());
+        .get_or_init(|| regex::Regex::new(r"^\d+#[ZPMQVRWSNKTXJBYH]{2}:").expect("valid hashline prefix regex"));
     re.find(line).map_or(line, |m| &line[m.end()..])
 }
 
