@@ -13,13 +13,16 @@
 //! - `build_js_context` / `build_js_options` fidelity
 
 use futures::StreamExt;
+use pi::agent::{Agent, AgentConfig, AgentEvent};
 use pi::extensions::{ExtensionManager, JsExtensionLoadSpec, JsExtensionRuntimeHandle};
 use pi::extensions_js::PiJsRuntimeConfig;
-use pi::model::{ContentBlock, Message, StopReason, StreamEvent, UserContent, UserMessage};
+use pi::model::{
+    AssistantMessageEvent, ContentBlock, Message, StopReason, StreamEvent, UserContent, UserMessage,
+};
 use pi::provider::{Context, StreamOptions};
 use pi::providers::create_provider;
 use pi::tools::ToolRegistry;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 
 // ---------------------------------------------------------------------------
@@ -533,7 +536,7 @@ fn stream_simple_string_chunks_map_to_text_deltas() {
 #[test]
 fn stream_simple_string_chunks_accumulate_in_partials() {
     make_runtime().block_on(async move {
-        let (_dir, manager) = load_extension(STRING_ONLY_EXTENSION).await;
+        let (dir, manager) = load_extension(STRING_ONLY_EXTENSION).await;
         let entries = manager.extension_model_entries();
         let entry = entries
             .iter()
@@ -541,28 +544,39 @@ fn stream_simple_string_chunks_accumulate_in_partials() {
             .expect("string-provider entry");
 
         let provider = create_provider(entry, Some(&manager)).expect("create provider");
-        let mut stream = provider
-            .stream(&basic_context(), &basic_options())
-            .await
-            .expect("stream");
+        let tools = ToolRegistry::new(&[], dir.path(), None);
+        let mut agent = Agent::new(provider, tools, AgentConfig::default());
+        let accumulated_texts = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&accumulated_texts);
 
-        // Track accumulated text in each TextDelta partial.
-        let mut accumulated_texts = Vec::new();
-        while let Some(item) = stream.next().await {
-            let event = item.expect("event ok");
-            match event {
-                StreamEvent::TextDelta { delta, .. } => {
-                    accumulated_texts.push(delta);
+        let final_message = agent
+            .run("hello", move |event| {
+                if let AgentEvent::MessageUpdate {
+                    assistant_message_event: AssistantMessageEvent::TextDelta { partial, .. },
+                    ..
+                } = event
+                {
+                    let text = match partial.content.first() {
+                        Some(ContentBlock::Text(text)) => text.text.clone(),
+                        other => panic!("expected text content block, got {other:?}"),
+                    };
+                    captured.lock().expect("lock accumulated texts").push(text);
                 }
-                StreamEvent::Done { .. } => break,
-                _ => {}
-            }
-        }
+            })
+            .await
+            .expect("agent run");
 
         assert_eq!(
-            accumulated_texts,
+            accumulated_texts
+                .lock()
+                .expect("lock accumulated texts")
+                .as_slice(),
             vec!["Hello", "Hello, ", "Hello, world", "Hello, world!"]
         );
+        let ContentBlock::Text(text) = &final_message.content[0] else {
+            panic!("expected text content");
+        };
+        assert_eq!(text.text, "Hello, world!");
     });
 }
 

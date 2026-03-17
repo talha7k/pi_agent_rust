@@ -740,16 +740,18 @@ impl Provider for ExtensionStreamSimpleProvider {
                                 content_index: 0,
                                 delta: chunk,
                             });
+                            // Raw string mode still streams deltas chunk-by-chunk, so the
+                            // synthetic Start event must begin empty. Otherwise the agent
+                            // seeds the partial with the first chunk and then appends that
+                            // same first delta again.
                             return Some((
                                 Ok(StreamEvent::Start {
-                                    partial: state.last_message.clone().unwrap_or_else(|| {
-                                        Self::make_partial(
-                                            &state.model_id,
-                                            &state.provider,
-                                            &state.api,
-                                            &state.accumulated_text,
-                                        )
-                                    }),
+                                    partial: Self::make_partial(
+                                        &state.model_id,
+                                        &state.provider,
+                                        &state.api,
+                                        "",
+                                    ),
                                 }),
                                 state,
                             ));
