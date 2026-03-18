@@ -1754,24 +1754,14 @@ impl PiApp {
                 None
             }
             SlashCommand::Changelog => {
-                let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("CHANGELOG.md");
-                match std::fs::read_to_string(&path) {
-                    Ok(content) => {
-                        self.messages.push(ConversationMessage {
-                            role: MessageRole::System,
-                            content,
-                            thinking: None,
-                            collapsed: false,
-                        });
-                        self.scroll_to_last_match("# ");
-                    }
-                    Err(err) => {
-                        self.status_message = Some(format!(
-                            "Failed to read changelog {}: {err}",
-                            path.display()
-                        ));
-                    }
-                }
+                let content = include_str!("../../CHANGELOG.md").to_string();
+                self.messages.push(ConversationMessage {
+                    role: MessageRole::System,
+                    content,
+                    thinking: None,
+                    collapsed: false,
+                });
+                self.scroll_to_last_match("# ");
                 None
             }
             SlashCommand::Tree => {
