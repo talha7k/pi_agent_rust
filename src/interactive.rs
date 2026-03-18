@@ -1710,7 +1710,9 @@ pub(crate) async fn enqueue_pi_event(event_tx: &mpsc::Sender<PiMsg>, cx: &Cx, ms
 }
 
 pub(crate) async fn enqueue_pi_event_current(event_tx: &mpsc::Sender<PiMsg>, msg: PiMsg) -> bool {
-    let cx = Cx::current().unwrap_or_else(Cx::for_request);
+    // UI events should always reach the user, even if the emitting background task
+    // has been cancelled. Use a fresh request context to bypass task cancellation.
+    let cx = Cx::for_request();
     enqueue_pi_event(event_tx, &cx, msg).await
 }
 

@@ -4472,7 +4472,8 @@ async fn ingest_bash_chunk(chunk: Vec<u8>, state: &mut BashOutputState) -> Resul
         // Create the file synchronously with restricted permissions to avoid
         // a race condition where the file is world-readable before we fix it.
         // We also capture the inode (on Unix) to verify identity later.
-        let expected_inode: Option<u64> = {
+        let path_clone = path.clone();
+        let expected_inode: Option<u64> = asupersync::runtime::spawn_blocking_io(move || -> std::io::Result<Option<u64>> {
             let mut options = std::fs::OpenOptions::new();
             options.write(true).create_new(true);
 
@@ -4482,24 +4483,26 @@ async fn ingest_bash_chunk(chunk: Vec<u8>, state: &mut BashOutputState) -> Resul
                 options.mode(0o600);
             }
 
-            match options.open(&path) {
+            match options.open(&path_clone) {
                 Ok(file) => {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::MetadataExt;
-                        file.metadata().ok().map(|m| m.ino())
+                        Ok(file.metadata().ok().map(|m| m.ino()))
                     }
                     #[cfg(not(unix))]
                     {
-                        None
+                        Ok(None)
                     }
                 }
                 Err(e) => {
                     tracing::warn!("Failed to create bash temp file: {e}");
-                    None
+                    Ok(None)
                 }
             }
-        };
+        })
+        .await
+        .unwrap_or(None);
 
         if expected_inode.is_some() || !cfg!(unix) {
             match asupersync::fs::OpenOptions::new()

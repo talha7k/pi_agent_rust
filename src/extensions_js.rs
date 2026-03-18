@@ -17373,11 +17373,11 @@ if (typeof globalThis.TextDecoder === 'undefined') {
                 return '';
             }
 
-            let out = '';
+            let outChunks = [];
             let chunk = [];
             for (let i = 0; i < bytes.length; ) {
                 if (chunk.length >= 4096) {
-                    out += String.fromCharCode.apply(null, chunk);
+                    outChunks.push(String.fromCharCode.apply(null, chunk));
                     chunk.length = 0;
                 }
                 const b0 = bytes[i++];
@@ -17407,9 +17407,9 @@ if (typeof globalThis.TextDecoder === 'undefined') {
                 }
             }
             if (chunk.length > 0) {
-                out += String.fromCharCode.apply(null, chunk);
+                outChunks.push(String.fromCharCode.apply(null, chunk));
             }
-            return out;
+            return outChunks.join('');
         }
     }
 
@@ -17768,19 +17768,19 @@ if (typeof globalThis.crypto.subtle.digest !== 'function') {
             throw new Error('crypto.subtle.digest: only SHA-256 is supported');
         }
         const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-        let text = '';
+        let textChunks = [];
         let chunk = [];
         for (let i = 0; i < bytes.length; i++) {
             chunk.push(bytes[i]);
             if (chunk.length >= 4096) {
-                text += String.fromCharCode.apply(null, chunk);
+                textChunks.push(String.fromCharCode.apply(null, chunk));
                 chunk.length = 0;
             }
         }
         if (chunk.length > 0) {
-            text += String.fromCharCode.apply(null, chunk);
+            textChunks.push(String.fromCharCode.apply(null, chunk));
         }
-        const hex = __pi_crypto_sha256_hex_native(text);
+        const hex = __pi_crypto_sha256_hex_native(textChunks.join(''));
         const out = new Uint8Array(hex.length / 2);
         for (let i = 0; i < out.length; i++) {
             out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -18368,19 +18368,19 @@ if (typeof globalThis.fetch !== 'function') {
             bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
         }
         if (!bytes) return null;
-        let binary = '';
+        let binaryChunks = [];
         let chunk = [];
         for (let i = 0; i < bytes.length; i++) {
             chunk.push(bytes[i]);
             if (chunk.length >= 4096) {
-                binary += String.fromCharCode.apply(null, chunk);
+                binaryChunks.push(String.fromCharCode.apply(null, chunk));
                 chunk.length = 0;
             }
         }
         if (chunk.length > 0) {
-            binary += String.fromCharCode.apply(null, chunk);
+            binaryChunks.push(String.fromCharCode.apply(null, chunk));
         }
-        return __pi_base64_encode_native(binary);
+        return __pi_base64_encode_native(binaryChunks.join(''));
     };
 
     class Headers {
