@@ -764,9 +764,64 @@ impl AuthStorage {
     }
 }
 
+/// Resolve an API key string that may contain a `$ENV:VAR_NAME` prefix.
+///
+/// - Plain string → returned as-is (backward compatible literal key).
+/// - `$ENV:VAR_NAME` → resolves the named environment variable at runtime.
+///
+/// Returns `None` when the key references an env var that is unset or empty.
+/// Returns `Err` with a descriptive message for malformed `$ENV:` references.
+fn resolve_api_key_source(raw: &str) -> std::result::Result<Option<String>, String> {
+    resolve_api_key_source_with_env(raw, |var| std::env::var(var).ok())
+}
+
+/// Testable version of [`resolve_api_key_source`] with injectable env lookup.
+fn resolve_api_key_source_with_env<F>(raw: &str, env_lookup: F) -> std::result::Result<Option<String>, String>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
+    if let Some(var_name) = raw.strip_prefix("$ENV:") {
+        if var_name.is_empty() {
+            return Err("$ENV: prefix requires a variable name (e.g. $ENV:MY_API_KEY)".to_string());
+        }
+        match env_lookup(var_name) {
+            Some(value) if !value.trim().is_empty() => Ok(Some(value.trim().to_string())),
+            Some(_) => {
+                tracing::warn!(
+                    event = "pi.auth.env_var_empty",
+                    var = var_name,
+                    "API key env var is set but empty"
+                );
+                Ok(None)
+            }
+            None => {
+                tracing::warn!(
+                    event = "pi.auth.env_var_missing",
+                    var = var_name,
+                    "API key env var is not set"
+                );
+                Ok(None)
+            }
+        }
+    } else {
+        // Plain literal key — backward compatible.
+        Ok(Some(raw.to_string()))
+    }
+}
+
 fn api_key_from_credential(credential: &AuthCredential) -> Option<String> {
     match credential {
-        AuthCredential::ApiKey { key } => Some(key.clone()),
+        AuthCredential::ApiKey { key } => match resolve_api_key_source(key) {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::warn!(
+                    event = "pi.auth.key_resolve_error",
+                    error = %err,
+                    "Failed to resolve API key source"
+                );
+                None
+            }
+        },
         AuthCredential::OAuth {
             access_token,
             expires,
@@ -1247,11 +1302,23 @@ where
             region,
         }),
         Some(AuthCredential::ApiKey { key }) => {
-            // Legacy: treat stored API key as bearer token for Bedrock
-            Some(AwsResolvedCredentials::Bearer {
-                token: key.clone(),
-                region,
-            })
+            // Legacy: treat stored API key as bearer token for Bedrock.
+            // Supports $ENV: prefix for env-var-backed keys.
+            match resolve_api_key_source(key) {
+                Ok(Some(resolved)) => Some(AwsResolvedCredentials::Bearer {
+                    token: resolved,
+                    region,
+                }),
+                Ok(None) => None,
+                Err(err) => {
+                    tracing::warn!(
+                        event = "pi.auth.key_resolve_error",
+                        error = %err,
+                        "Failed to resolve API key source for bedrock"
+                    );
+                    None
+                }
+            }
         }
         _ => None,
     }
@@ -7833,5 +7900,175 @@ mod tests {
             codex_openai_api_key_from_value(&value).as_deref(),
             Some("sk-openai")
         );
+    }
+
+    // ── ApiKeySource resolution tests ───────────────────────────────
+
+    #[test]
+    fn test_resolve_api_key_source_literal_string() {
+        let result = resolve_api_key_source_with_env("sk-plain-key-12345", |_| None);
+        assert_eq!(result.unwrap(), Some("sk-plain-key-12345".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_empty_literal() {
+        let result = resolve_api_key_source_with_env("", |_| None);
+        assert_eq!(result.unwrap(), Some(String::new()));
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_env_var_resolves() {
+        let result = resolve_api_key_source_with_env("$ENV:MY_API_KEY", |var| {
+            assert_eq!(var, "MY_API_KEY");
+            Some("resolved-secret-key".to_string())
+        });
+        assert_eq!(result.unwrap(), Some("resolved-secret-key".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_env_var_trims_whitespace() {
+        let result =
+            resolve_api_key_source_with_env("$ENV:MY_KEY", |_| Some("  spaced-key  ".to_string()));
+        assert_eq!(result.unwrap(), Some("spaced-key".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_env_var_missing_returns_none() {
+        let result = resolve_api_key_source_with_env("$ENV:NONEXISTENT_VAR", |_| None);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_env_var_empty_returns_none() {
+        let result = resolve_api_key_source_with_env("$ENV:EMPTY_VAR", |_| Some(String::new()));
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_env_var_whitespace_only_returns_none() {
+        let result =
+            resolve_api_key_source_with_env("$ENV:WS_ONLY", |_| Some("   ".to_string()));
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_env_prefix_no_var_name_is_error() {
+        let result = resolve_api_key_source_with_env("$ENV:", |_| None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires a variable name"));
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_dollar_without_env_is_literal() {
+        // "$NOTENV:FOO" is NOT a special prefix — only "$ENV:" is.
+        let result = resolve_api_key_source_with_env("$NOTENV:FOO", |_| {
+            panic!("should not call env_lookup for non-$ENV: prefixed keys");
+        });
+        assert_eq!(result.unwrap(), Some("$NOTENV:FOO".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_api_key_source_case_sensitive_prefix() {
+        // "$env:FOO" (lowercase) should NOT trigger env resolution — only "$ENV:" is valid.
+        let result = resolve_api_key_source_with_env("$env:MY_KEY", |_| {
+            panic!("should not call env_lookup for lowercase $env:");
+        });
+        assert_eq!(result.unwrap(), Some("$env:MY_KEY".to_string()));
+    }
+
+    #[test]
+    fn test_api_key_from_credential_resolves_env_var() {
+        // Test env var resolution through the testable `resolve_api_key_source_with_env` function,
+        // since the crate forbids unsafe code (and `std::env::set_var` is unsafe).
+        let result = resolve_api_key_source_with_env("$ENV:MY_SECRET_KEY", |var| {
+            assert_eq!(var, "MY_SECRET_KEY");
+            Some("from-env-42".to_string())
+        });
+        assert_eq!(result.unwrap(), Some("from-env-42".to_string()));
+    }
+
+    #[test]
+    fn test_api_key_from_credential_literal_backward_compat() {
+        let cred = AuthCredential::ApiKey {
+            key: "sk-ant-plain-key".to_string(),
+        };
+        let result = api_key_from_credential(&cred);
+        assert_eq!(result, Some("sk-ant-plain-key".to_string()));
+    }
+
+    #[test]
+    fn test_api_key_from_credential_env_var_missing_returns_none() {
+        let result = resolve_api_key_source_with_env("$ENV:DEFINITELY_NOT_SET", |_| None);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_env_key_roundtrip_serialization() {
+        let cred = AuthCredential::ApiKey {
+            key: "$ENV:OPENAI_API_KEY".to_string(),
+        };
+        let json = serde_json::to_string(&cred).expect("serialize");
+        let parsed: AuthCredential = serde_json::from_str(&json).expect("deserialize");
+        match parsed {
+            AuthCredential::ApiKey { key } => {
+                assert_eq!(key, "$ENV:OPENAI_API_KEY");
+            }
+            other => panic!("expected ApiKey, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_env_key_in_auth_file_roundtrip() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let auth_path = dir.path().join("auth.json");
+        let mut auth = AuthStorage {
+            path: auth_path.clone(),
+            entries: HashMap::new(),
+        };
+        auth.set(
+            "openai",
+            AuthCredential::ApiKey {
+                key: "$ENV:OPENAI_API_KEY".to_string(),
+            },
+        );
+        auth.save().expect("save");
+
+        let loaded = AuthStorage::load(auth_path).expect("load");
+        match loaded.get("openai") {
+            Some(AuthCredential::ApiKey { key }) => {
+                assert_eq!(key, "$ENV:OPENAI_API_KEY");
+            }
+            other => panic!("expected ApiKey with $ENV: prefix, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_resolve_api_key_env_source_integration() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let auth_path = dir.path().join("auth.json");
+        let mut auth = AuthStorage {
+            path: auth_path,
+            entries: HashMap::new(),
+        };
+        auth.set(
+            "openai",
+            AuthCredential::ApiKey {
+                key: "$ENV:PI_TEST_OPENAI_KEY_INTEG".to_string(),
+            },
+        );
+
+        // Without the env var set, stored key should resolve to None, then fall
+        // through the resolution chain.
+        let resolved_without_env =
+            auth.resolve_api_key_with_env_lookup("openai", None, |_| None);
+        assert!(
+            resolved_without_env.is_none(),
+            "env-backed key with unset var and no env fallback should resolve to None"
+        );
+
+        // With override, override always wins regardless of stored key format.
+        let resolved_with_override =
+            auth.resolve_api_key_with_env_lookup("openai", Some("override-key"), |_| None);
+        assert_eq!(resolved_with_override.as_deref(), Some("override-key"));
     }
 }
