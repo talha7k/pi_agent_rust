@@ -137,6 +137,12 @@ jobs:
           path: pi_agent_rust
           fetch-depth: 0
           ref: ${{ needs.plan.outputs.tag }}
+          # DO NOT add `submodules: false` here (YAML boolean).
+          # actions/checkout@v4 treats the YAML boolean false as "recursive",
+          # which then fails because legacy_pi_mono_code/pi-mono has no
+          # .gitmodules entry. Omitting the key entirely gives the correct
+          # default (string "false" = don't checkout submodules).
+          # See: https://github.com/Dicklesworthstone/pi_agent_rust/issues/34
 
       - name: Ensure submodule content exists
         run: |
@@ -183,12 +189,21 @@ jobs:
           path: sqlmodel_rust
           fetch-depth: 1
 
-      - name: Install system deps (xcb) [linux]
+      - name: Install system deps (xcb + build tools) [linux]
         if: runner.os == 'Linux'
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+          # libxcb: required by arboard (clipboard crate) on Linux.
+          # build-essential: ensures gcc/make are present for C-FFI crates
+          # (tikv-jemallocator, rquickjs, wasmtime) — particularly important
+          # on the ubuntu-24.04-arm runner which may have a minimal image.
+          sudo apt-get install -y \
+            build-essential \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
 
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@nightly
