@@ -163,7 +163,11 @@ impl SseParser {
                         current.id = Some(value.to_string());
                     }
                 }
-                "retry" => current.retry = value.parse().ok(),
+                "retry" => {
+                    if let Ok(retry_val) = value.parse() {
+                        current.retry = Some(retry_val);
+                    }
+                }
                 _ => {} // Unknown field - ignore
             }
         } else {
