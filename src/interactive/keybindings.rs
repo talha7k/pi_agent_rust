@@ -1463,7 +1463,7 @@ mod tests {
     #[test]
     fn quit_cmd_schedules_shutdown_when_event_queue_is_full() {
         let current = model_entry("openai", "gpt-4o-mini", Some("old-key"), HashMap::new());
-        let (mut app, event_rx) = build_test_app_with_event_rx(current.clone(), vec![current]);
+        let (mut app, mut event_rx) = build_test_app_with_event_rx(current.clone(), vec![current]);
         app.event_tx
             .try_send(PiMsg::System("busy".to_string()))
             .expect("fill bounded event channel");

@@ -623,7 +623,6 @@ impl PiApp {
         let runtime_handle = self.runtime_handle.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
             if let Ok(mut agent_guard) = agent.lock(&task_cx).await {
                 agent_guard.set_queue_modes(steering_mode, follow_up_mode);
             }
@@ -1069,8 +1068,6 @@ impl PiApp {
         let runtime_handle = self.runtime_handle.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
-
             let mut session_guard = match session.lock(&task_cx).await {
                 Ok(guard) => guard,
                 Err(err) => {
@@ -1469,8 +1466,6 @@ impl PiApp {
 
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
-
             if let Some(manager) = extensions.clone() {
                 let cancelled = manager
                     .dispatch_cancellable_event(
@@ -1484,8 +1479,9 @@ impl PiApp {
                     .await
                     .unwrap_or(false);
                 if cancelled {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::System("Session switch cancelled by extension".to_string()),
                     )
                     .await;
@@ -1496,8 +1492,9 @@ impl PiApp {
             let mut loaded_session = match Session::open(&path).await {
                 Ok(session) => session,
                 Err(err) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::AgentError(format!("Failed to open session: {err}")),
                     )
                     .await;
@@ -1531,8 +1528,9 @@ impl PiApp {
                 let mut agent_guard = match agent.lock(&task_cx).await {
                     Ok(guard) => guard,
                     Err(err) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::AgentError(format!("Failed to lock agent: {err}")),
                         )
                         .await;
@@ -1558,8 +1556,9 @@ impl PiApp {
                 conversation_from_session(&session_guard)
             };
 
-            let _ = crate::interactive::enqueue_pi_event_current(
+            let _ = crate::interactive::enqueue_pi_event(
                 &event_tx,
+                &task_cx,
                 PiMsg::ConversationReset {
                     messages,
                     usage,
@@ -1621,13 +1620,12 @@ pub async fn run_interactive(
         let _ = crossterm::execute!(stdout, cursor::Hide);
     }
 
-    let (event_tx, event_rx) = mpsc::channel::<PiMsg>(1024);
+    let (event_tx, mut event_rx) = mpsc::channel::<PiMsg>(1024);
     let shutdown_event_tx = event_tx.clone();
     let (ui_tx, ui_rx) = std::sync::mpsc::channel::<Message>();
 
     let ui_bridge_cx = Cx::current().unwrap_or_else(Cx::for_request);
     runtime_handle.spawn(async move {
-        let _current = Cx::set_current(Some(ui_bridge_cx.clone()));
         while let Ok(msg) = event_rx.recv(&ui_bridge_cx).await {
             if matches!(msg, PiMsg::UiShutdown) {
                 break;
@@ -1639,13 +1637,12 @@ pub async fn run_interactive(
     let extensions = extensions;
 
     if let Some(manager) = &extensions {
-        let (extension_ui_tx, extension_ui_rx) = mpsc::channel::<ExtensionUiRequest>(64);
+        let (extension_ui_tx, mut extension_ui_rx) = mpsc::channel::<ExtensionUiRequest>(64);
         manager.set_ui_sender(extension_ui_tx);
 
         let extension_event_tx = event_tx.clone();
         let extension_ui_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(extension_ui_cx.clone()));
             while let Ok(request) = extension_ui_rx.recv(&extension_ui_cx).await {
                 if !enqueue_pi_event(
                     &extension_event_tx,

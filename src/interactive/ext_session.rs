@@ -806,7 +806,7 @@ mod tests {
             .expect("runtime build");
 
         runtime.block_on(async {
-            let (actions, event_rx, session, agent) = build_host_actions();
+            let (actions, mut event_rx, session, agent) = build_host_actions();
 
             actions
                 .send_message(ExtensionSendMessage {
@@ -861,7 +861,7 @@ mod tests {
             .expect("runtime build");
 
         runtime.block_on(async {
-            let (actions, event_rx, _session, _agent) = build_host_actions();
+            let (actions, mut event_rx, _session, _agent) = build_host_actions();
 
             actions
                 .send_message(ExtensionSendMessage {
@@ -890,7 +890,7 @@ mod tests {
             .expect("runtime build");
 
         runtime.block_on(async {
-            let (actions, event_rx, _session, _agent) = build_host_actions_with_capacity(1);
+            let (actions, mut event_rx, _session, _agent) = build_host_actions_with_capacity(1);
             actions.extension_streaming.store(true, Ordering::SeqCst);
             actions
                 .event_tx
@@ -928,7 +928,7 @@ mod tests {
             .expect("runtime build");
 
         runtime.block_on(async {
-            let (actions, event_rx, _session, _agent) = build_host_actions_with_capacity(1);
+            let (actions, mut event_rx, _session, _agent) = build_host_actions_with_capacity(1);
             actions
                 .event_tx
                 .try_send(PiMsg::System("busy".to_string()))
@@ -970,7 +970,7 @@ mod tests {
             .expect("runtime build");
 
         runtime.block_on(async {
-            let (actions, event_rx, _session, _agent) = build_host_actions_with_capacity(1);
+            let (actions, mut event_rx, _session, _agent) = build_host_actions_with_capacity(1);
             actions
                 .event_tx
                 .try_send(PiMsg::System("busy".to_string()))

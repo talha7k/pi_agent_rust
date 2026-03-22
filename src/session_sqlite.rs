@@ -131,13 +131,12 @@ pub async fn load_session_meta(path: &Path) -> Result<SqliteSessionMeta> {
         .validate()
         .map_err(|reason| Error::session(format!("Invalid session header: {reason}")))?;
 
-    let meta_rows = match conn.query_sync(
-        "SELECT key,value FROM pi_session_meta WHERE key IN ('message_count','name')",
-        &[],
-    ) {
-        Ok(rows) => rows,
-        _ => Vec::new(),
-    };
+    let meta_rows = conn
+        .query_sync(
+            "SELECT key,value FROM pi_session_meta WHERE key IN ('message_count','name')",
+            &[],
+        )
+        .unwrap_or_default();
 
     let mut message_count: Option<u64> = None;
     let mut name: Option<String> = None;

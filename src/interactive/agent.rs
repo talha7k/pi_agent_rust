@@ -1016,7 +1016,6 @@ After approving access in the browser, press Enter in Pi to complete login."
         let cmd_for_msg = command_name.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx));
             let result = runtime
                 .execute_command(
                     command_name,
@@ -1035,8 +1034,9 @@ After approving access in the browser, press Enter in Pi to complete login."
                     } else {
                         format!("/{cmd_for_msg} completed: {value}")
                     };
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::ExtensionCommandDone {
                             command: cmd_for_msg,
                             display,
@@ -1046,8 +1046,9 @@ After approving access in the browser, press Enter in Pi to complete login."
                     .await;
                 }
                 Err(err) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::ExtensionCommandDone {
                             command: cmd_for_msg,
                             display: format!("Extension command error: {err}"),
@@ -1090,7 +1091,6 @@ After approving access in the browser, press Enter in Pi to complete login."
         let key_for_msg = key_id_owned.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx));
             let result = runtime
                 .execute_shortcut(
                     key_id_owned,
@@ -1102,8 +1102,9 @@ After approving access in the browser, press Enter in Pi to complete login."
             match result {
                 Ok(_) => {
                     let display = format!("Shortcut [{key_for_msg}] executed.");
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::ExtensionCommandDone {
                             command: key_for_msg,
                             display,
@@ -1113,8 +1114,9 @@ After approving access in the browser, press Enter in Pi to complete login."
                     .await;
                 }
                 Err(err) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::ExtensionCommandDone {
                             command: key_for_msg,
                             display: format!("Shortcut error: {err}"),
@@ -1254,7 +1256,6 @@ After approving access in the browser, press Enter in Pi to complete login."
         let runtime_handle_for_task = runtime_handle.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
             #[cfg(test)]
             emit_submit_continue_deadline_probe(task_cx.budget().deadline);
             if let Some(manager) = extensions.clone() {
@@ -1413,7 +1414,6 @@ After approving access in the browser, press Enter in Pi to complete login."
         let runtime_handle_for_task = runtime_handle.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
             let mut content_for_agent = content_for_agent;
             if let Some(manager) = extensions.clone() {
                 let (text, images) = split_content_blocks_for_input(&content_for_agent);
@@ -1422,30 +1422,34 @@ After approving access in the browser, press Enter in Pi to complete login."
                         content_for_agent = build_content_blocks_for_input(&text, &images);
                         let updated = content_blocks_to_text(&content_for_agent);
                         if updated != display_owned {
-                            let _ = crate::interactive::enqueue_pi_event_current(
+                            let _ = crate::interactive::enqueue_pi_event(
                                 &event_tx,
+                                &task_cx,
                                 PiMsg::UpdateLastUserMessage(updated),
                             )
                             .await;
                         }
                     }
                     Ok(InputEventOutcome::Block { reason }) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::UpdateLastUserMessage("[input blocked]".to_string()),
                         )
                         .await;
                         let message = reason.unwrap_or_else(|| "Input blocked".to_string());
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::AgentError(message),
                         )
                         .await;
                         return;
                     }
                     Err(err) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::AgentError(err.to_string()),
                         )
                         .await;
@@ -1681,7 +1685,6 @@ After approving access in the browser, press Enter in Pi to complete login."
         let runtime_handle_for_agent = runtime_handle.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
             let mut message_for_agent = message_for_agent;
             let mut input_images = Vec::new();
             if let Some(manager) = extensions.clone() {
@@ -1690,30 +1693,34 @@ After approving access in the browser, press Enter in Pi to complete login."
                         message_for_agent = text;
                         input_images = images;
                         if message_for_agent != displayed_message {
-                            let _ = crate::interactive::enqueue_pi_event_current(
+                            let _ = crate::interactive::enqueue_pi_event(
                                 &event_tx,
+                                &task_cx,
                                 PiMsg::UpdateLastUserMessage(message_for_agent.clone()),
                             )
                             .await;
                         }
                     }
                     Ok(InputEventOutcome::Block { reason }) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::UpdateLastUserMessage("[input blocked]".to_string()),
                         )
                         .await;
                         let message = reason.unwrap_or_else(|| "Input blocked".to_string());
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::AgentError(message),
                         )
                         .await;
                         return;
                     }
                     Err(err) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::AgentError(err.to_string()),
                         )
                         .await;
@@ -2081,7 +2088,7 @@ mod stream_delta_batcher_tests {
 
     #[test]
     fn coalesces_adjacent_deltas_of_same_kind() {
-        let (tx, rx) = mpsc::channel(8);
+        let (tx, mut rx) = mpsc::channel(8);
         let mut batcher = UiStreamDeltaBatcher::new(tx);
         batcher.flush_interval = std::time::Duration::from_secs(60);
         batcher.last_flush = std::time::Instant::now();
@@ -2098,7 +2105,7 @@ mod stream_delta_batcher_tests {
 
     #[test]
     fn send_immediate_flushes_pending_before_tool_event() {
-        let (tx, rx) = mpsc::channel(8);
+        let (tx, mut rx) = mpsc::channel(8);
         let mut batcher = UiStreamDeltaBatcher::new(tx);
         batcher.flush_interval = std::time::Duration::from_secs(60);
         batcher.last_flush = std::time::Instant::now();
@@ -2119,7 +2126,7 @@ mod stream_delta_batcher_tests {
 
     #[test]
     fn retains_unsent_chunk_when_channel_is_full() {
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel(1);
         let mut batcher = UiStreamDeltaBatcher::new(tx);
         batcher.flush_interval = std::time::Duration::from_secs(60);
         batcher.last_flush = std::time::Instant::now();
@@ -2139,7 +2146,7 @@ mod stream_delta_batcher_tests {
 
     #[test]
     fn retains_immediate_events_when_channel_is_full() {
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel(1);
         let mut batcher = UiStreamDeltaBatcher::new(tx);
         batcher.flush_interval = std::time::Duration::from_secs(60);
         batcher.last_flush = std::time::Instant::now();
@@ -2176,7 +2183,7 @@ mod stream_delta_batcher_tests {
         let provider: Arc<dyn Provider> = Arc::new(ContinueProbeProvider {
             state: Arc::clone(&state),
         });
-        let (mut app, event_rx) = build_test_app_with_provider(provider);
+        let (mut app, mut event_rx) = build_test_app_with_provider(provider);
 
         runtime().block_on(async {
             let cx = Cx::for_request();
@@ -2236,7 +2243,7 @@ mod stream_delta_batcher_tests {
 
     #[test]
     fn spawn_save_session_inherits_cancelled_context_when_session_lock_is_held() {
-        let (app, event_rx) = build_test_app_with_provider(Arc::new(DummyProvider));
+        let (app, mut event_rx) = build_test_app_with_provider(Arc::new(DummyProvider));
 
         runtime().block_on(async {
             let hold_cx = Cx::for_request();
@@ -2283,7 +2290,7 @@ mod stream_delta_batcher_tests {
 
     #[test]
     fn submit_continue_inherits_cancelled_context_when_agent_lock_is_attempted() {
-        let (mut app, event_rx) = build_test_app_with_provider(Arc::new(DummyProvider));
+        let (mut app, mut event_rx) = build_test_app_with_provider(Arc::new(DummyProvider));
 
         runtime().block_on(async {
             let ambient_cx = Cx::for_testing();

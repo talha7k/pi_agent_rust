@@ -262,7 +262,7 @@ impl PackageManager {
     pub async fn install(&self, source: &str, scope: PackageScope) -> Result<()> {
         let this = self.clone();
         let source = source.to_string();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.install_sync(&source, scope);
@@ -304,7 +304,7 @@ impl PackageManager {
     pub async fn remove(&self, source: &str, scope: PackageScope) -> Result<()> {
         let this = self.clone();
         let source = source.to_string();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.remove_sync(&source, scope);
@@ -331,7 +331,7 @@ impl PackageManager {
     pub async fn update_source(&self, source: &str, scope: PackageScope) -> Result<()> {
         let this = self.clone();
         let source = source.to_string();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.update_source_sync(&source, scope);
@@ -376,7 +376,7 @@ impl PackageManager {
     ) -> Result<Option<PathBuf>> {
         let this = self.clone();
         let source = source.to_string();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.installed_path_sync(&source, scope);
@@ -411,7 +411,7 @@ impl PackageManager {
 
     pub async fn list_packages(&self) -> Result<Vec<PackageEntry>> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.list_packages_sync();
@@ -587,7 +587,7 @@ impl PackageManager {
     pub async fn resolve_with_roots(&self, roots: &ResolveRoots) -> Result<ResolvedPaths> {
         let this_for_setup = self.clone();
         let roots_for_setup = roots.clone();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         // Offload the heavy lifting (sync I/O) to a thread
         let handle = thread::spawn(move || {
@@ -630,7 +630,7 @@ impl PackageManager {
         // Offload the rest of sync resolution
         let this = self.clone();
         let roots = roots.clone();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
         let accumulator = std::sync::Mutex::new(accumulator);
 
         let handle = thread::spawn(move || {
@@ -722,7 +722,7 @@ impl PackageManager {
 
         Box::pin(self.resolve_package_sources(&package_sources, &mut accumulator)).await?;
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
         let accumulator = std::sync::Mutex::new(accumulator);
 
         let handle = thread::spawn(move || {
@@ -745,7 +745,7 @@ impl PackageManager {
     pub async fn add_package_source(&self, source: &str, scope: PackageScope) -> Result<()> {
         let this = self.clone();
         let source = source.to_string();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.add_package_source_sync(&source, scope);
@@ -774,7 +774,7 @@ impl PackageManager {
     pub async fn remove_package_source(&self, source: &str, scope: PackageScope) -> Result<()> {
         let this = self.clone();
         let source = source.to_string();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         let handle = thread::spawn(move || {
             let res = this.remove_package_source_sync(&source, scope);

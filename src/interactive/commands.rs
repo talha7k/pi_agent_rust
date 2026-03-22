@@ -882,13 +882,13 @@ impl PiApp {
         let runtime_handle = self.runtime_handle.clone();
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx));
             let auth_path = crate::config::Config::auth_path();
             let mut auth = match crate::auth::AuthStorage::load_async(auth_path).await {
                 Ok(a) => a,
                 Err(e) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::AgentError(e.to_string()),
                     )
                     .await;
@@ -1021,8 +1021,9 @@ impl PiApp {
             let credential = match credential {
                 Ok(c) => c,
                 Err(e) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::AgentError(e.to_string()),
                     )
                     .await;
@@ -1032,15 +1033,17 @@ impl PiApp {
 
             save_provider_credential(&mut auth, &provider, credential);
             if let Err(e) = auth.save_async().await {
-                let _ = crate::interactive::enqueue_pi_event_current(
+                let _ = crate::interactive::enqueue_pi_event(
                     &event_tx,
+                    &task_cx,
                     PiMsg::AgentError(e.to_string()),
                 )
                 .await;
                 return;
             }
-            let _ = crate::interactive::enqueue_pi_event_current(
+            let _ = crate::interactive::enqueue_pi_event(
                 &event_tx,
+                &task_cx,
                 PiMsg::CredentialUpdated {
                     provider: provider.clone(),
                 },
@@ -1057,8 +1060,9 @@ impl PiApp {
                     )
                 }
             };
-            let _ = crate::interactive::enqueue_pi_event_current(
+            let _ = crate::interactive::enqueue_pi_event(
                 &event_tx,
+                &task_cx,
                 PiMsg::System(status),
             )
             .await;
@@ -1097,7 +1101,6 @@ impl PiApp {
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
 
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx.clone()));
             let result = crate::tools::run_bash_command(
                 &cwd,
                 shell_path.as_deref(),
@@ -1137,8 +1140,9 @@ impl PiApp {
 
                         let mut display = display;
                         display.push_str("\n\n[Output excluded from model context]");
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::BashResult {
                                 display,
                                 content_for_agent: None,
@@ -1148,8 +1152,9 @@ impl PiApp {
                     } else {
                         let content_for_agent =
                             vec![ContentBlock::Text(TextContent::new(display.clone()))];
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::BashResult {
                                 display,
                                 content_for_agent: Some(content_for_agent),
@@ -1159,8 +1164,9 @@ impl PiApp {
                     }
                 }
                 Err(err) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::BashResult {
                             display: format!("Bash command failed: {err}"),
                             content_for_agent: None,
@@ -1562,8 +1568,6 @@ impl PiApp {
 
                 let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
                 runtime_handle.spawn(async move {
-                    let _current = Cx::set_current(Some(task_cx.clone()));
-
                     let cancelled = extensions
                         .dispatch_cancellable_event(
                             ExtensionEventName::SessionBeforeSwitch,
@@ -1573,8 +1577,9 @@ impl PiApp {
                         .await
                         .unwrap_or(false);
                     if cancelled {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &task_cx,
                             PiMsg::System("Session switch cancelled by extension".to_string()),
                         )
                         .await;
@@ -1608,8 +1613,9 @@ impl PiApp {
                         let mut agent_guard = match agent.lock(&task_cx).await {
                             Ok(guard) => guard,
                             Err(err) => {
-                                let _ = crate::interactive::enqueue_pi_event_current(
+                                let _ = crate::interactive::enqueue_pi_event(
                                     &event_tx,
+                                    &task_cx,
                                     PiMsg::AgentError(format!("Failed to lock agent: {err}")),
                                 )
                                 .await;
@@ -1620,8 +1626,9 @@ impl PiApp {
                         agent_guard.stream_options_mut().thinking_level = Some(ThinkingLevel::Off);
                     }
 
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::ConversationReset {
                             messages: Vec::new(),
                             usage: Usage::default(),
@@ -1852,11 +1859,11 @@ impl PiApp {
             let cx = asupersync::Cx::current().unwrap_or_else(asupersync::Cx::for_request);
 
             runtime_handle.spawn(async move {
-                let _current = asupersync::Cx::set_current(Some(cx));
                 match crate::auth::start_kimi_code_device_flow().await {
                     Ok(device) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &cx,
                             PiMsg::OAuthDeviceFlowStarted {
                                 provider: provider_clone,
                                 device_code: device.device_code,
@@ -1870,8 +1877,9 @@ impl PiApp {
                         .await;
                     }
                     Err(err) => {
-                        let _ = crate::interactive::enqueue_pi_event_current(
+                        let _ = crate::interactive::enqueue_pi_event(
                             &event_tx,
+                            &cx,
                             PiMsg::AgentError(format!("OAuth login failed: {err}")),
                         )
                         .await;
@@ -2359,7 +2367,6 @@ result in account suspension/ban. Prefer using an Anthropic API key (ANTHROPIC_A
         let task_cx = Cx::current().unwrap_or_else(Cx::for_request);
 
         runtime_handle.spawn(async move {
-            let _current = Cx::set_current(Some(task_cx));
             let manager = PackageManager::new(cwd.clone());
             match ResourceLoader::load(&manager, &cwd, &config, &cli).await {
                 Ok(resources) => {
@@ -2386,8 +2393,9 @@ result in account suspension/ban. Prefer using an Anthropic API key (ANTHROPIC_A
                         let _ = write!(status, " ({diag_count} diagnostics)");
                     }
 
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::ResourcesReloaded {
                             resources,
                             status,
@@ -2397,8 +2405,9 @@ result in account suspension/ban. Prefer using an Anthropic API key (ANTHROPIC_A
                     .await;
                 }
                 Err(err) => {
-                    let _ = crate::interactive::enqueue_pi_event_current(
+                    let _ = crate::interactive::enqueue_pi_event(
                         &event_tx,
+                        &task_cx,
                         PiMsg::AgentError(format!("Failed to reload resources: {err}")),
                     )
                     .await;

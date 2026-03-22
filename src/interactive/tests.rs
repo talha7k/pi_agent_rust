@@ -301,7 +301,7 @@ fn oauth_device_flow_started_sets_pending_device_flow_state_and_prompt() {
 #[test]
 fn enqueue_ui_shutdown_waits_for_capacity_in_full_channel() {
     asupersync::test_utils::run_test(|| async {
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(1);
         event_tx
             .try_send(PiMsg::System("busy".to_string()))
             .expect("fill bounded event channel");
@@ -325,7 +325,7 @@ fn enqueue_ui_shutdown_waits_for_capacity_in_full_channel() {
 #[test]
 fn enqueue_pi_event_preserves_extension_ui_requests_under_backpressure() {
     asupersync::test_utils::run_test(|| async {
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(1);
         event_tx
             .try_send(PiMsg::System("busy".to_string()))
             .expect("fill bounded event channel");
@@ -369,7 +369,7 @@ fn enqueue_pi_event_preserves_extension_ui_requests_under_backpressure() {
 #[test]
 fn enqueue_pi_event_preserves_conversation_reset_under_backpressure() {
     asupersync::test_utils::run_test(|| async {
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(1);
         event_tx
             .try_send(PiMsg::System("busy".to_string()))
             .expect("fill bounded event channel");
@@ -428,7 +428,7 @@ fn enqueue_pi_event_preserves_conversation_reset_under_backpressure() {
 #[test]
 fn enqueue_pi_event_current_uses_ambient_context_under_backpressure() {
     asupersync::test_utils::run_test(|| async {
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(1);
         event_tx
             .try_send(PiMsg::System("busy".to_string()))
             .expect("fill bounded event channel");
@@ -459,7 +459,7 @@ fn enqueue_pi_event_current_ignores_ambient_context_cancellation() {
     asupersync::test_utils::run_test(|| async {
         use asupersync::types::CancelKind;
 
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(1);
         event_tx
             .try_send(PiMsg::System("busy".to_string()))
             .expect("fill bounded event channel");

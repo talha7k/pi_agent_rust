@@ -619,7 +619,7 @@ fn create_session_on_disk_with_id(
 
 #[allow(dead_code)]
 fn wait_for_pi_msgs(
-    event_rx: &mpsc::Receiver<PiMsg>,
+    event_rx: &mut mpsc::Receiver<PiMsg>,
     timeout: Duration,
     predicate: impl Fn(&[PiMsg]) -> bool,
 ) -> Vec<PiMsg> {
@@ -3304,7 +3304,7 @@ fn tui_state_slash_share_reports_error_when_gh_missing() {
         gh_path: Some(missing.display().to_string()),
         ..Default::default()
     };
-    let (mut app, event_rx) = build_app_with_session_and_events_and_config(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_config(
         &harness,
         Vec::new(),
         Session::in_memory(),
@@ -3318,7 +3318,7 @@ fn tui_state_slash_share_reports_error_when_gh_missing() {
 
     // Under load, async command execution plus shell startup for fake `gh`
     // can exceed 1s before AgentError is emitted.
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(3), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(3), |msgs| {
         msgs.iter().any(|msg| matches!(msg, PiMsg::AgentError(_)))
     });
     let error = events
@@ -3344,7 +3344,7 @@ fn tui_state_slash_share_reports_error_when_gh_not_authenticated() {
         gh_path: Some(gh_path.display().to_string()),
         ..Default::default()
     };
-    let (mut app, event_rx) = build_app_with_session_and_events_and_config(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_config(
         &harness,
         Vec::new(),
         Session::in_memory(),
@@ -3356,7 +3356,7 @@ fn tui_state_slash_share_reports_error_when_gh_not_authenticated() {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Sharing session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter().any(|msg| matches!(msg, PiMsg::AgentError(_)))
     });
     let error = events
@@ -3387,7 +3387,7 @@ fn tui_state_slash_share_reports_parse_error_and_cleans_temp_file() {
         gh_path: Some(gh_path.display().to_string()),
         ..Default::default()
     };
-    let (mut app, event_rx) = build_app_with_session_and_events_and_config(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_config(
         &harness,
         Vec::new(),
         Session::in_memory(),
@@ -3399,7 +3399,7 @@ fn tui_state_slash_share_reports_parse_error_and_cleans_temp_file() {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Sharing session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter().any(|msg| matches!(msg, PiMsg::AgentError(_)))
     });
     let error = events
@@ -3446,7 +3446,7 @@ fn tui_state_slash_share_creates_gist_and_reports_urls_and_cleans_temp_file() {
         gh_path: Some(gh_path.display().to_string()),
         ..Default::default()
     };
-    let (mut app, event_rx) = build_app_with_session_and_events_and_config(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_config(
         &harness,
         Vec::new(),
         Session::in_memory(),
@@ -3459,7 +3459,7 @@ fn tui_state_slash_share_creates_gist_and_reports_urls_and_cleans_temp_file() {
     assert_after_contains(&harness, &step, "Sharing session...");
 
     // Full-suite parallel load can delay command completion past 1s.
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(3), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(3), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::System(_)) || matches!(msg, PiMsg::AgentError(_)))
     });
@@ -3513,7 +3513,7 @@ fn tui_state_slash_share_is_cancellable_and_cleans_temp_file() {
         gh_path: Some(gh_path.display().to_string()),
         ..Default::default()
     };
-    let (mut app, event_rx) = build_app_with_session_and_events_and_config(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_config(
         &harness,
         Vec::new(),
         Session::in_memory(),
@@ -3534,7 +3534,7 @@ fn tui_state_slash_share_is_cancellable_and_cleans_temp_file() {
     let step = press_esc(&harness, &mut app);
     assert_after_contains(&harness, &step, "Aborting request...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::System(message) if message.contains("Share cancelled")))
     });
@@ -3576,7 +3576,7 @@ fn tui_state_slash_share_public_flag_creates_public_gist() {
         gh_path: Some(gh_path.display().to_string()),
         ..Default::default()
     };
-    let (mut app, event_rx) = build_app_with_session_and_events_and_config(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_config(
         &harness,
         Vec::new(),
         Session::in_memory(),
@@ -3594,7 +3594,7 @@ fn tui_state_slash_share_public_flag_creates_public_gist() {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Sharing session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(3), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(3), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::System(_)) || matches!(msg, PiMsg::AgentError(_)))
     });
@@ -3642,7 +3642,7 @@ fn tui_state_slash_share_includes_gist_description() {
     let mut session = Session::in_memory();
     session.set_name("my-debug-session");
 
-    let (mut app, event_rx) =
+    let (mut app, mut event_rx) =
         build_app_with_session_and_events_and_config(&harness, Vec::new(), session, config);
     log_initial_state(&harness, &app);
 
@@ -3650,7 +3650,7 @@ fn tui_state_slash_share_includes_gist_description() {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Sharing session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(3), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(3), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::System(_)) || matches!(msg, PiMsg::AgentError(_)))
     });
@@ -3725,7 +3725,7 @@ fn tui_state_slash_resume_selects_latest_session_and_loads_messages() {
 
     let mut session = Session::create_with_dir(Some(base_dir));
     session.header.cwd = cwd.display().to_string();
-    let (mut app, event_rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
+    let (mut app, mut event_rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
     log_initial_state(&harness, &app);
 
     type_text(&harness, &mut app, "/resume");
@@ -3737,7 +3737,7 @@ fn tui_state_slash_resume_selects_latest_session_and_loads_messages() {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Loading session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(2), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(2), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::ConversationReset { .. }))
     });
@@ -3762,7 +3762,7 @@ fn tui_state_slash_resume_filters_sessions_from_typed_query() {
 
     let mut session = Session::create_with_dir(Some(base_dir));
     session.header.cwd = cwd.display().to_string();
-    let (mut app, event_rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
+    let (mut app, mut event_rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
     log_initial_state(&harness, &app);
 
     type_text(&harness, &mut app, "/resume");
@@ -3780,7 +3780,7 @@ fn tui_state_slash_resume_filters_sessions_from_typed_query() {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Loading session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(2), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(2), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::ConversationReset { .. }))
     });
@@ -3830,7 +3830,7 @@ export default function init(pi) {
   pi.on("session_before_switch", async () => false);
 }
 "#;
-    let (mut app, event_rx) = build_app_with_session_and_events_and_extension(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_extension(
         &harness,
         Vec::new(),
         session,
@@ -3846,7 +3846,7 @@ export default function init(pi) {
     let step = press_enter(&harness, &mut app);
     assert_after_contains(&harness, &step, "Loading session...");
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter().any(|msg| matches!(msg, PiMsg::System(_)))
     });
     let system = events
@@ -3877,7 +3877,7 @@ export default function init(pi) {
   pi.on("session_before_switch", async () => { throw new Error("boom"); });
 }
 "#;
-    let (mut app, event_rx) = build_app_with_session_and_events_and_extension(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_extension(
         &harness,
         Vec::new(),
         session,
@@ -3890,7 +3890,7 @@ export default function init(pi) {
     press_enter(&harness, &mut app);
     press_enter(&harness, &mut app);
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::ConversationReset { .. }))
     });
@@ -4042,7 +4042,7 @@ export default function init(pi) {
   pi.on("session_before_switch", async () => false);
 }
 "#;
-    let (mut app, event_rx) = build_app_with_session_and_events_and_extension(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_extension(
         &harness,
         Vec::new(),
         session,
@@ -4065,7 +4065,7 @@ export default function init(pi) {
     type_text(&harness, &mut app, "/new");
     press_enter(&harness, &mut app);
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter().any(|msg| matches!(msg, PiMsg::System(_)))
     });
     let system = events
@@ -4089,7 +4089,7 @@ export default function init(pi) {
   pi.on("session_before_switch", async () => { throw new Error("boom"); });
 }
 "#;
-    let (mut app, event_rx) = build_app_with_session_and_events_and_extension(
+    let (mut app, mut event_rx) = build_app_with_session_and_events_and_extension(
         &harness,
         Vec::new(),
         session,
@@ -4112,7 +4112,7 @@ export default function init(pi) {
     type_text(&harness, &mut app, "/new");
     press_enter(&harness, &mut app);
 
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(1), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(1), |msgs| {
         msgs.iter()
             .any(|msg| matches!(msg, PiMsg::ConversationReset { .. }))
     });
@@ -4219,7 +4219,7 @@ fn tui_state_slash_fork_creates_session_and_prefills_editor() {
         timestamp: Some(0),
     });
 
-    let (mut app, event_rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
+    let (mut app, mut event_rx) = build_app_with_session_and_events(&harness, Vec::new(), session);
     log_initial_state(&harness, &app);
 
     type_text(&harness, &mut app, "/fork");
@@ -4228,7 +4228,7 @@ fn tui_state_slash_fork_creates_session_and_prefills_editor() {
 
     // /fork first runs a cancellable extension hook (timeout is 5s), so a
     // sub-second wait is flaky and can miss ConversationReset on busy hosts.
-    let events = wait_for_pi_msgs(&event_rx, Duration::from_secs(6), |msgs| {
+    let events = wait_for_pi_msgs(&mut event_rx, Duration::from_secs(6), |msgs| {
         let has_reset = msgs
             .iter()
             .any(|msg| matches!(msg, PiMsg::ConversationReset { .. }));

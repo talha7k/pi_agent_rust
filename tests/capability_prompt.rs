@@ -446,7 +446,7 @@ mod extension_ui_channel {
         let handle = runtime.handle();
 
         runtime.block_on(async move {
-            let (ui_tx, ui_rx) = mpsc::channel(16);
+            let (ui_tx, mut ui_rx) = mpsc::channel(16);
             manager.set_ui_sender(ui_tx);
 
             let responder = manager.clone();
@@ -478,7 +478,7 @@ mod extension_ui_channel {
         let handle = runtime.handle();
 
         runtime.block_on(async move {
-            let (ui_tx, ui_rx) = mpsc::channel(16);
+            let (ui_tx, mut ui_rx) = mpsc::channel(16);
             manager.set_ui_sender(ui_tx);
 
             let responder = manager.clone();
@@ -1016,7 +1016,7 @@ mod full_flow {
 
         runtime.block_on(async move {
             let manager = ExtensionManager::new();
-            let (ui_tx, ui_rx) = mpsc::channel(16);
+            let (ui_tx, mut ui_rx) = mpsc::channel(16);
             manager.set_ui_sender(ui_tx);
 
             // Simulate UI thread auto-approving.
@@ -1049,7 +1049,7 @@ mod full_flow {
 
         runtime.block_on(async move {
             let manager = ExtensionManager::new();
-            let (ui_tx, ui_rx) = mpsc::channel(16);
+            let (ui_tx, mut ui_rx) = mpsc::channel(16);
             manager.set_ui_sender(ui_tx);
 
             let responder = manager.clone();

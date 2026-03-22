@@ -2873,7 +2873,7 @@ impl<C: SchedulerClock + 'static> ExtensionDispatcher<C> {
 
         let cmd = cmd.to_string();
         let args = args.clone();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
         let call_id_for_error = call_id.to_string();
 
         thread::spawn(move || {

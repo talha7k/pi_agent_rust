@@ -18871,17 +18871,18 @@ function outer() {
 
     #[test]
     fn maybe_cjs_to_esm_injects_module_for_nested_false_positive_bundle_bindings() {
-        let source = r#"
-var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
-var require_demo = __commonJS((exports, module) => {
-    module.exports = { ok: true };
-});
-function outer() {
-    function module() {}
-    var exports = {};
-}
-export const loaded = require_demo();
-"#;
+        let source = concat!(
+            "\n",
+            "var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);\n",
+            "var require_demo = __commonJS((exports, module) => {\n",
+            "    module.exports = { ok: true };\n",
+            "});\n",
+            "function outer() {\n",
+            "    function module() {}\n",
+            "    var exports = {};\n",
+            "}\n",
+            "export const loaded = require_demo();\n",
+        );
 
         let rewritten = maybe_cjs_to_esm(source);
         assert!(
