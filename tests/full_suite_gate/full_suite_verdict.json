@@ -1,6 +1,6 @@
 {
   "schema": "pi.ci.full_suite_gate.v1",
-  "generated_at": "2026-03-22T01:24:04.958Z",
+  "generated_at": "2026-03-22T02:11:11.897Z",
   "verdict": "fail",
   "policy": "Full-suite gate: all blocking gates must pass for release. Non-blocking gates produce warnings but do not block.",
   "gates": [
@@ -74,9 +74,10 @@
       "id": "conformance_pass_rate",
       "name": "Conformance pass rate >= 80%",
       "bead": "bd-1f42.4",
-      "status": "pass",
+      "status": "fail",
       "blocking": true,
       "artifact_path": "tests/ext_conformance/reports/conformance_summary.json",
+      "detail": "Pass rate 0.0% < 80% threshold",
       "reproduce_command": "cargo test --test conformance_report -- --nocapture"
     },
     {
@@ -191,11 +192,11 @@
   ],
   "summary": {
     "total_gates": 20,
-    "passed": 16,
-    "failed": 3,
+    "passed": 15,
+    "failed": 4,
     "warned": 0,
     "skipped": 1,
-    "blocking_pass": 12,
+    "blocking_pass": 11,
     "blocking_total": 14,
     "all_blocking_pass": false
   }

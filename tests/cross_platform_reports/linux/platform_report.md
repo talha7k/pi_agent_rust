@@ -1,6 +1,6 @@
 # Cross-Platform CI Matrix — LINUX
 
-> Generated: 2026-03-22T01:24:04Z
+> Generated: 2026-03-22T02:11:11Z
 > OS: linux / x86_64
 > Required checks: 8/8 passed
 
@@ -16,7 +16,7 @@
 | E2E TUI test support (tmux) | required | PASS | - |
 | POSIX file permission support | informational | PASS | - |
 | Extension test artifacts present | required | PASS | - |
-| Evidence bundle index present | informational | SKIP | - |
+| Evidence bundle index present | informational | PASS | - |
 | Suite classification file present and valid | required | PASS | - |
 
 ## Merge Policy

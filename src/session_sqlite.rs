@@ -1,9 +1,8 @@
-use crate::agent_cx::AgentCx;
 use crate::error::{Error, Result};
 use crate::session::{SessionEntry, SessionHeader};
 use crate::session_metrics;
-use asupersync::Outcome;
-use asupersync::database::{SqliteConnection, SqliteError, SqliteRow, SqliteValue};
+use sqlmodel_core::{Error as SqliteError, Row as SqliteRow, Value as SqliteValue};
+use sqlmodel_sqlite::{OpenFlags, SqliteConfig, SqliteConnection};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -35,20 +34,22 @@ pub struct SqliteSessionMeta {
     pub name: Option<String>,
 }
 
-fn map_outcome<T>(outcome: Outcome<T, SqliteError>) -> Result<T> {
-    match outcome {
-        Outcome::Ok(value) => Ok(value),
-        Outcome::Err(err) => Err(Error::session(format!("SQLite session error: {err}"))),
-        Outcome::Cancelled(_) => Err(Error::Aborted),
-        Outcome::Panicked(payload) => Err(Error::session(format!(
-            "SQLite session operation panicked: {payload:?}"
-        ))),
-    }
+fn map_sqlite_result<T>(result: std::result::Result<T, SqliteError>) -> Result<T> {
+    result.map_err(|err| Error::session(format!("SQLite session error: {err}")))
 }
 
-fn row_get_str<'a>(row: &'a SqliteRow, column: &str) -> Result<&'a str> {
-    row.get_str(column)
+fn open_sqlite_connection(path: &Path) -> Result<SqliteConnection> {
+    let config = SqliteConfig::file(path.to_string_lossy()).flags(OpenFlags::create_read_write());
+    map_sqlite_result(SqliteConnection::open(&config))
+}
+
+fn row_get_string(row: &SqliteRow, column: &str) -> Result<String> {
+    row.get_named::<String>(column)
         .map_err(|err| Error::session(format!("SQLite row read failed: {err}")))
+}
+
+fn rollback_quietly(conn: &SqliteConnection) {
+    let _ = conn.execute_raw("ROLLBACK");
 }
 
 fn compute_message_count_and_name(entries: &[SessionEntry]) -> (u64, Option<String>) {
@@ -80,35 +81,27 @@ pub async fn load_session(path: &Path) -> Result<(SessionHeader, Vec<SessionEntr
         });
     }
 
-    let cx = AgentCx::for_request();
-    let conn = map_outcome(SqliteConnection::open(cx.cx(), path).await)?;
+    let conn = open_sqlite_connection(path)?;
 
-    let header_rows = map_outcome(
-        conn.query(cx.cx(), "SELECT json FROM pi_session_header LIMIT 1", &[])
-            .await,
-    )?;
+    let header_rows =
+        map_sqlite_result(conn.query_sync("SELECT json FROM pi_session_header LIMIT 1", &[]))?;
     let header_row = header_rows
         .first()
         .ok_or_else(|| Error::session("SQLite session missing header row"))?;
-    let header_json = row_get_str(header_row, "json")?;
-    let header: SessionHeader = serde_json::from_str(header_json)?;
+    let header_json = row_get_string(header_row, "json")?;
+    let header: SessionHeader = serde_json::from_str(&header_json)?;
     header
         .validate()
         .map_err(|reason| Error::session(format!("Invalid session header: {reason}")))?;
 
-    let entry_rows = map_outcome(
-        conn.query(
-            cx.cx(),
-            "SELECT json FROM pi_session_entries ORDER BY seq ASC",
-            &[],
-        )
-        .await,
+    let entry_rows = map_sqlite_result(
+        conn.query_sync("SELECT json FROM pi_session_entries ORDER BY seq ASC", &[]),
     )?;
 
     let mut entries = Vec::with_capacity(entry_rows.len());
     for row in entry_rows {
-        let json = row_get_str(&row, "json")?;
-        let entry: SessionEntry = serde_json::from_str(json)?;
+        let json = row_get_string(&row, "json")?;
+        let entry: SessionEntry = serde_json::from_str(&json)?;
         entries.push(entry);
     }
 
@@ -125,44 +118,37 @@ pub async fn load_session_meta(path: &Path) -> Result<SqliteSessionMeta> {
         });
     }
 
-    let cx = AgentCx::for_request();
-    let conn = map_outcome(SqliteConnection::open(cx.cx(), path).await)?;
+    let conn = open_sqlite_connection(path)?;
 
-    let header_rows = map_outcome(
-        conn.query(cx.cx(), "SELECT json FROM pi_session_header LIMIT 1", &[])
-            .await,
-    )?;
+    let header_rows =
+        map_sqlite_result(conn.query_sync("SELECT json FROM pi_session_header LIMIT 1", &[]))?;
     let header_row = header_rows
         .first()
         .ok_or_else(|| Error::session("SQLite session missing header row"))?;
-    let header_json = row_get_str(header_row, "json")?;
-    let header: SessionHeader = serde_json::from_str(header_json)?;
+    let header_json = row_get_string(header_row, "json")?;
+    let header: SessionHeader = serde_json::from_str(&header_json)?;
     header
         .validate()
         .map_err(|reason| Error::session(format!("Invalid session header: {reason}")))?;
 
-    let meta_rows = match conn
-        .query(
-            cx.cx(),
-            "SELECT key,value FROM pi_session_meta WHERE key IN ('message_count','name')",
-            &[],
-        )
-        .await
-    {
-        Outcome::Ok(rows) => rows,
+    let meta_rows = match conn.query_sync(
+        "SELECT key,value FROM pi_session_meta WHERE key IN ('message_count','name')",
+        &[],
+    ) {
+        Ok(rows) => rows,
         _ => Vec::new(),
     };
 
     let mut message_count: Option<u64> = None;
     let mut name: Option<String> = None;
     for row in meta_rows {
-        let key = row_get_str(&row, "key")?;
-        let value = row_get_str(&row, "value")?;
-        match key {
+        let key = row_get_string(&row, "key")?;
+        let value = row_get_string(&row, "value")?;
+        match key.as_str() {
             "message_count" => message_count = value.parse::<u64>().ok(),
             "name" => {
                 if !value.is_empty() {
-                    name = Some(value.to_string());
+                    name = Some(value);
                 }
             }
             _ => {}
@@ -172,19 +158,14 @@ pub async fn load_session_meta(path: &Path) -> Result<SqliteSessionMeta> {
     let message_count = if let Some(message_count) = message_count {
         message_count
     } else {
-        let entry_rows = map_outcome(
-            conn.query(
-                cx.cx(),
-                "SELECT json FROM pi_session_entries ORDER BY seq ASC",
-                &[],
-            )
-            .await,
+        let entry_rows = map_sqlite_result(
+            conn.query_sync("SELECT json FROM pi_session_entries ORDER BY seq ASC", &[]),
         )?;
 
         let mut entries = Vec::with_capacity(entry_rows.len());
         for row in entry_rows {
-            let json = row_get_str(&row, "json")?;
-            let entry: SessionEntry = serde_json::from_str(json)?;
+            let json = row_get_string(&row, "json")?;
+            let entry: SessionEntry = serde_json::from_str(&json)?;
             entries.push(entry);
         }
 
@@ -392,46 +373,22 @@ mod tests {
         assert_eq!(name, Some("Named".to_string()));
     }
 
-    // -- map_outcome tests --
+    // -- map_sqlite_result tests --
 
     #[test]
-    fn map_outcome_ok() {
-        let outcome: Outcome<i32, SqliteError> = Outcome::Ok(42);
-        let result = map_outcome(outcome);
+    fn map_sqlite_result_ok() {
+        let result = map_sqlite_result::<i32>(Ok(42));
         assert_eq!(result.unwrap(), 42);
     }
 
     #[test]
-    fn map_outcome_err() {
-        let outcome: Outcome<i32, SqliteError> = Outcome::Err(SqliteError::ConnectionClosed);
-        let result = map_outcome(outcome);
+    fn map_sqlite_result_err() {
+        let config = SqliteConfig::file("bad\0path").flags(OpenFlags::create_read_write());
+        let result = map_sqlite_result::<i32>(SqliteConnection::open(&config).map(|_| 42));
         let err = result.unwrap_err();
         match err {
             Error::Session(message) => {
                 assert!(message.contains("SQLite session error"));
-            }
-            other => unreachable!("Unexpected error: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn map_outcome_cancelled() {
-        use asupersync::types::CancelKind;
-        let reason = asupersync::CancelReason::new(CancelKind::User);
-        let outcome: Outcome<i32, SqliteError> = Outcome::Cancelled(reason);
-        let result = map_outcome(outcome);
-        assert!(matches!(result.unwrap_err(), Error::Aborted));
-    }
-
-    #[test]
-    fn map_outcome_panicked() {
-        use asupersync::types::PanicPayload;
-        let outcome: Outcome<i32, SqliteError> = Outcome::Panicked(PanicPayload::new("test panic"));
-        let result = map_outcome(outcome);
-        let err = result.unwrap_err();
-        match err {
-            Error::Session(message) => {
-                assert!(message.contains("panicked"));
             }
             other => unreachable!("Unexpected error: {:?}", other),
         }
@@ -597,95 +554,84 @@ pub async fn save_session(
         asupersync::fs::create_dir_all(parent).await?;
     }
 
-    let cx = AgentCx::for_request();
-    let conn = map_outcome(SqliteConnection::open(cx.cx(), path).await)?;
-    map_outcome(conn.execute_batch(cx.cx(), INIT_SQL).await)?;
-
-    let tx = map_outcome(conn.begin_immediate(cx.cx()).await)?;
-
-    map_outcome(
-        tx.execute(cx.cx(), "DELETE FROM pi_session_entries", &[])
-            .await,
-    )?;
-    map_outcome(
-        tx.execute(cx.cx(), "DELETE FROM pi_session_header", &[])
-            .await,
-    )?;
-    map_outcome(
-        tx.execute(cx.cx(), "DELETE FROM pi_session_meta", &[])
-            .await,
-    )?;
+    let conn = open_sqlite_connection(path)?;
+    map_sqlite_result(conn.execute_raw(INIT_SQL))?;
+    map_sqlite_result(conn.execute_raw("BEGIN IMMEDIATE"))?;
 
     // Serialize header + entries and track serialization time + bytes.
-    let serialize_timer = metrics.start_timer(&metrics.sqlite_serialize);
-    let header_json = serde_json::to_string(header)?;
-    let mut total_json_bytes = header_json.len() as u64;
+    let save_result = (|| -> Result<()> {
+        map_sqlite_result(conn.execute_sync("DELETE FROM pi_session_entries", &[]))?;
+        map_sqlite_result(conn.execute_sync("DELETE FROM pi_session_header", &[]))?;
+        map_sqlite_result(conn.execute_sync("DELETE FROM pi_session_meta", &[]))?;
 
-    let mut entry_jsons = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let json = serde_json::to_string(entry)?;
-        total_json_bytes += json.len() as u64;
-        entry_jsons.push(json);
-    }
-    serialize_timer.finish();
-    metrics.record_bytes(&metrics.sqlite_bytes, total_json_bytes);
+        let serialize_timer = metrics.start_timer(&metrics.sqlite_serialize);
+        let header_json = serde_json::to_string(header)?;
+        let mut total_json_bytes = header_json.len() as u64;
 
-    map_outcome(
-        tx.execute(
-            cx.cx(),
+        let mut entry_jsons = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let json = serde_json::to_string(entry)?;
+            total_json_bytes += json.len() as u64;
+            entry_jsons.push(json);
+        }
+        serialize_timer.finish();
+        metrics.record_bytes(&metrics.sqlite_bytes, total_json_bytes);
+
+        map_sqlite_result(conn.execute_sync(
             "INSERT INTO pi_session_header (id,json) VALUES (?1,?2)",
             &[
                 SqliteValue::Text(header.id.clone()),
                 SqliteValue::Text(header_json),
             ],
-        )
-        .await,
-    )?;
+        ))?;
 
-    let mut seq = 1_i64;
-    for chunk in entry_jsons.chunks(200) {
-        let mut sql = String::with_capacity(64 + chunk.len() * 16);
-        sql.push_str("INSERT INTO pi_session_entries (seq,json) VALUES ");
-        let mut params = Vec::with_capacity(chunk.len() * 2);
-        for (i, json) in chunk.iter().enumerate() {
-            if i > 0 {
-                sql.push(',');
+        let mut seq = 1_i64;
+        for chunk in entry_jsons.chunks(200) {
+            let mut sql = String::with_capacity(64 + chunk.len() * 16);
+            sql.push_str("INSERT INTO pi_session_entries (seq,json) VALUES ");
+            let mut params = Vec::with_capacity(chunk.len() * 2);
+            for (i, json) in chunk.iter().enumerate() {
+                if i > 0 {
+                    sql.push(',');
+                }
+                let _ = write!(sql, "(?{},?{})", i * 2 + 1, i * 2 + 2);
+                params.push(SqliteValue::BigInt(seq));
+                params.push(SqliteValue::Text(json.clone()));
+                seq += 1;
             }
-            let _ = write!(sql, "(?{},?{})", i * 2 + 1, i * 2 + 2);
-            params.push(SqliteValue::Integer(seq));
-            params.push(SqliteValue::Text(json.clone()));
-            seq += 1;
+            map_sqlite_result(conn.execute_sync(&sql, &params))?;
         }
-        map_outcome(tx.execute(cx.cx(), &sql, &params).await)?;
-    }
 
-    let (message_count, name) = compute_message_count_and_name(entries);
-    map_outcome(
-        tx.execute(
-            cx.cx(),
+        let (message_count, name) = compute_message_count_and_name(entries);
+        map_sqlite_result(conn.execute_sync(
             "INSERT INTO pi_session_meta (key,value) VALUES (?1,?2)",
             &[
                 SqliteValue::Text("message_count".to_string()),
                 SqliteValue::Text(message_count.to_string()),
             ],
-        )
-        .await,
-    )?;
-    let name_value = name.unwrap_or_else(String::new);
-    map_outcome(
-        tx.execute(
-            cx.cx(),
+        ))?;
+        let name_value = name.unwrap_or_default();
+        map_sqlite_result(conn.execute_sync(
             "INSERT INTO pi_session_meta (key,value) VALUES (?1,?2)",
             &[
                 SqliteValue::Text("name".to_string()),
                 SqliteValue::Text(name_value),
             ],
-        )
-        .await,
-    )?;
+        ))?;
 
-    map_outcome(tx.commit(cx.cx()).await)?;
-    Ok(())
+        Ok(())
+    })();
+
+    match save_result {
+        Ok(()) => {
+            map_sqlite_result(conn.execute_raw("COMMIT"))?;
+            Ok(())
+        }
+        Err(err) => {
+            rollback_quietly(&conn);
+            Err(err)
+        }
+    }
 }
 
 /// Incrementally append new entries to an existing SQLite session database.
@@ -706,70 +652,72 @@ pub async fn append_entries(
     let metrics = session_metrics::global();
     let _timer = metrics.start_timer(&metrics.sqlite_append);
 
-    let cx = AgentCx::for_request();
-    let conn = map_outcome(SqliteConnection::open(cx.cx(), path).await)?;
+    let conn = open_sqlite_connection(path)?;
 
     // Ensure WAL mode is active and tables exist (especially pi_session_meta for old DBs).
-    map_outcome(conn.execute_batch(cx.cx(), INIT_SQL).await)?;
+    map_sqlite_result(conn.execute_raw(INIT_SQL))?;
+    map_sqlite_result(conn.execute_raw("BEGIN IMMEDIATE"))?;
 
-    let tx = map_outcome(conn.begin_immediate(cx.cx()).await)?;
-
-    // Serialize and insert only the new entries.
-    let serialize_timer = metrics.start_timer(&metrics.sqlite_serialize);
-    let mut total_json_bytes = 0u64;
-    let mut entry_jsons = Vec::with_capacity(new_entries.len());
-    for entry in new_entries {
-        let json = serde_json::to_string(entry)?;
-        total_json_bytes += json.len() as u64;
-        entry_jsons.push(json);
-    }
-    serialize_timer.finish();
-    metrics.record_bytes(&metrics.sqlite_bytes, total_json_bytes);
-
-    let mut seq = i64::try_from(start_seq)
-        .unwrap_or(i64::MAX.saturating_sub(1))
-        .saturating_add(1);
-    for chunk in entry_jsons.chunks(200) {
-        let mut sql = String::with_capacity(64 + chunk.len() * 16);
-        sql.push_str("INSERT INTO pi_session_entries (seq,json) VALUES ");
-        let mut params = Vec::with_capacity(chunk.len() * 2);
-        for (i, json) in chunk.iter().enumerate() {
-            if i > 0 {
-                sql.push(',');
-            }
-            let _ = write!(sql, "(?{},?{})", i * 2 + 1, i * 2 + 2);
-            params.push(SqliteValue::Integer(seq));
-            params.push(SqliteValue::Text(json.clone()));
-            seq += 1;
+    let append_result = (|| -> Result<()> {
+        // Serialize and insert only the new entries.
+        let serialize_timer = metrics.start_timer(&metrics.sqlite_serialize);
+        let mut total_json_bytes = 0u64;
+        let mut entry_jsons = Vec::with_capacity(new_entries.len());
+        for entry in new_entries {
+            let json = serde_json::to_string(entry)?;
+            total_json_bytes += json.len() as u64;
+            entry_jsons.push(json);
         }
-        map_outcome(tx.execute(cx.cx(), &sql, &params).await)?;
-    }
+        serialize_timer.finish();
+        metrics.record_bytes(&metrics.sqlite_bytes, total_json_bytes);
 
-    // Upsert meta counters (INSERT OR REPLACE).
-    map_outcome(
-        tx.execute(
-            cx.cx(),
+        let mut seq = i64::try_from(start_seq)
+            .unwrap_or(i64::MAX.saturating_sub(1))
+            .saturating_add(1);
+        for chunk in entry_jsons.chunks(200) {
+            let mut sql = String::with_capacity(64 + chunk.len() * 16);
+            sql.push_str("INSERT INTO pi_session_entries (seq,json) VALUES ");
+            let mut params = Vec::with_capacity(chunk.len() * 2);
+            for (i, json) in chunk.iter().enumerate() {
+                if i > 0 {
+                    sql.push(',');
+                }
+                let _ = write!(sql, "(?{},?{})", i * 2 + 1, i * 2 + 2);
+                params.push(SqliteValue::BigInt(seq));
+                params.push(SqliteValue::Text(json.clone()));
+                seq += 1;
+            }
+            map_sqlite_result(conn.execute_sync(&sql, &params))?;
+        }
+
+        // Upsert meta counters (INSERT OR REPLACE).
+        map_sqlite_result(conn.execute_sync(
             "INSERT OR REPLACE INTO pi_session_meta (key,value) VALUES (?1,?2)",
             &[
                 SqliteValue::Text("message_count".to_string()),
                 SqliteValue::Text(message_count.to_string()),
             ],
-        )
-        .await,
-    )?;
-    let name_value = session_name.unwrap_or("");
-    map_outcome(
-        tx.execute(
-            cx.cx(),
+        ))?;
+        let name_value = session_name.unwrap_or("");
+        map_sqlite_result(conn.execute_sync(
             "INSERT OR REPLACE INTO pi_session_meta (key,value) VALUES (?1,?2)",
             &[
                 SqliteValue::Text("name".to_string()),
                 SqliteValue::Text(name_value.to_string()),
             ],
-        )
-        .await,
-    )?;
+        ))?;
 
-    map_outcome(tx.commit(cx.cx()).await)?;
-    Ok(())
+        Ok(())
+    })();
+
+    match append_result {
+        Ok(()) => {
+            map_sqlite_result(conn.execute_raw("COMMIT"))?;
+            Ok(())
+        }
+        Err(err) => {
+            rollback_quietly(&conn);
+            Err(err)
+        }
+    }
 }

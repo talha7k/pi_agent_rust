@@ -1,6 +1,6 @@
 {
   "schema": "pi.ci.cross_platform_matrix.v1",
-  "generated_at": "2026-03-22T01:24:04.845Z",
+  "generated_at": "2026-03-22T02:11:11.784Z",
   "platform": "linux",
   "platform_details": {
     "arch": "x86_64",
@@ -150,8 +150,7 @@
       "name": "Evidence bundle index present",
       "platform": "linux",
       "policy": "informational",
-      "status": "skip",
-      "reason": "Run build_evidence_bundle first"
+      "status": "pass"
     },
     {
       "id": "suite_classification",
@@ -163,9 +162,9 @@
   ],
   "summary": {
     "total_checks": 10,
-    "passed": 9,
+    "passed": 10,
     "failed": 0,
-    "skipped": 1,
+    "skipped": 0,
     "unsupported": 0,
     "required_pass": 8,
     "required_total": 8,
