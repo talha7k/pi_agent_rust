@@ -1,7 +1,7 @@
 {
   "schema": "pi.ci.certification_lane.v1",
   "lane": "full",
-  "generated_at": "2026-03-15T16:29:29.368Z",
+  "generated_at": "2026-03-22T01:24:05.029Z",
   "verdict": "fail",
   "policy": "Full certification: all blocking gates must pass for release. Waived gates are tracked but do not block. Expired waivers fail the waiver_lifecycle gate.",
   "gates": [
@@ -36,9 +36,10 @@
       "id": "ext_provider_compat",
       "name": "Extension provider compatibility matrix",
       "bead": "bd-1f42.4.6",
-      "status": "pass",
+      "status": "skip",
       "blocking": false,
       "artifact_path": "tests/ext_conformance/reports/provider_compat/provider_compat_report.json",
+      "detail": "Artifact not found: tests/ext_conformance/reports/provider_compat/provider_compat_report.json",
       "reproduce_command": "cargo test --test ext_conformance_generated --features ext-conformance -- conformance_provider_compat_matrix --nocapture --exact"
     },
     {
@@ -64,9 +65,10 @@
       "id": "conformance_regression",
       "name": "Conformance regression gate",
       "bead": "bd-1f42.4",
-      "status": "pass",
+      "status": "fail",
       "blocking": true,
       "artifact_path": "tests/ext_conformance/reports/regression_verdict.json",
+      "detail": "Artifact not found: tests/ext_conformance/reports/regression_verdict.json; fail-closed policy: blocking gates cannot remain in skip state",
       "reproduce_command": "cargo test --test conformance_regression_gate -- --nocapture"
     },
     {
@@ -190,7 +192,7 @@
   ],
   "waiver_audit": {
     "schema": "pi.ci.waiver_audit.v1",
-    "generated_at": "2026-03-15T16:29:29.351Z",
+    "generated_at": "2026-03-22T01:24:05.029Z",
     "total_waivers": 0,
     "active": 0,
     "expired": 0,
@@ -202,23 +204,24 @@
   "waivers_applied": [],
   "summary": {
     "total_gates": 20,
-    "passed": 18,
-    "failed": 2,
+    "passed": 16,
+    "failed": 3,
     "warned": 0,
-    "skipped": 0,
+    "skipped": 1,
     "waived": 0,
-    "blocking_pass": 13,
+    "blocking_pass": 12,
     "blocking_total": 14,
     "all_blocking_pass": false
   },
   "promotion_rules": {
     "can_promote": false,
     "blocker_gates": [
-      "ext_must_pass"
+      "ext_must_pass",
+      "conformance_regression"
     ],
     "waiver_gates": [],
     "conditions": [
-      "Blocking gates still failing: ext_must_pass"
+      "Blocking gates still failing: ext_must_pass, conformance_regression"
     ]
   },
   "rerun_guidance": {

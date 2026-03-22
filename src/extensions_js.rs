@@ -6265,6 +6265,7 @@ struct BindingScanner {
     mode: BindingLexMode,
     escaped: bool,
     state: DeclState,
+    brace_depth: usize,
 }
 
 impl BindingScanner {
@@ -6416,10 +6417,27 @@ fn source_declares_binding(source: &str, name: &str) -> bool {
             continue;
         }
 
+        if b == b'{' {
+            scanner.brace_depth = scanner.brace_depth.saturating_add(1);
+            scanner.state = DeclState::None;
+            i += 1;
+            continue;
+        }
+
+        if b == b'}' {
+            scanner.brace_depth = scanner.brace_depth.saturating_sub(1);
+            scanner.state = DeclState::None;
+            i += 1;
+            continue;
+        }
+
         if is_js_ident_start(b) {
             let token = consume_js_identifier(source, bytes, &mut i);
-            if scanner.advance_state(token, name) {
+            if scanner.brace_depth == 0 && scanner.advance_state(token, name) {
                 return true;
+            }
+            if scanner.brace_depth > 0 {
+                scanner.state = DeclState::None;
             }
             continue;
         }
@@ -18832,6 +18850,48 @@ export const bundled = join(__dirname, "doom1.wad");
     fn source_declares_binding_detects_inline_const_binding() {
         let source = r#"import { dirname } from "node:path"; const __dirname = dirname("/tmp/demo"); export const bundled = __dirname;"#;
         assert!(source_declares_binding(source, "__dirname"));
+    }
+
+    #[test]
+    fn source_declares_binding_ignores_nested_bindings() {
+        let source = r#"
+const topLevel = true;
+function outer() {
+    function module() {}
+    var exports = {};
+    const require = () => "nested";
+    return { module, exports, require };
+}
+"#;
+
+        assert!(!source_declares_binding(source, "module"));
+        assert!(!source_declares_binding(source, "exports"));
+        assert!(!source_declares_binding(source, "require"));
+    }
+
+    #[test]
+    fn maybe_cjs_to_esm_injects_module_for_nested_false_positive_bundle_bindings() {
+        let source = r#"
+var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var require_demo = __commonJS((exports, module) => {
+    module.exports = { ok: true };
+});
+function outer() {
+    function module() {}
+    var exports = {};
+}
+export const loaded = require_demo();
+"#;
+
+        let rewritten = maybe_cjs_to_esm(source);
+        assert!(
+            rewritten.contains("const module = { exports: {} };"),
+            "nested bundle bindings must not suppress the CJS module shim:\n{rewritten}"
+        );
+        assert!(
+            rewritten.contains("const exports = module.exports;"),
+            "nested bundle bindings must not suppress the CJS exports shim:\n{rewritten}"
+        );
     }
 
     #[test]

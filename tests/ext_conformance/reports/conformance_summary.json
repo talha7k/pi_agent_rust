@@ -1,25 +1,25 @@
 {
-  "correlation_id": "conformance-summary-local-20260316T142227720Z",
+  "correlation_id": "conformance-summary-local-20260322T012407280Z",
   "counts": {
     "fail": 0,
-    "na": 164,
-    "pass": 60,
-    "tested": 60,
+    "na": 224,
+    "pass": 0,
+    "tested": 0,
     "total": 224
   },
-  "coverage_rate_pct": 26.785714285714285,
+  "coverage_rate_pct": 0.0,
   "evidence": {
     "golden_fixtures": 60,
-    "load_time_benchmarks": 60,
-    "parity_logs": 16,
-    "smoke_logs": 16
+    "load_time_benchmarks": 0,
+    "parity_logs": 0,
+    "smoke_logs": 0
   },
-  "generated_at": "2026-03-16T14:22:27Z",
+  "generated_at": "2026-03-22T01:24:07Z",
   "negative": {
     "fail": 0,
-    "pass": 30
+    "pass": 0
   },
-  "pass_rate_pct": 100.0,
+  "pass_rate_pct": 0.0,
   "per_tier": {
     "agents-mikeastock": {
       "fail": 0,
@@ -41,8 +41,8 @@
     },
     "official-pi-mono": {
       "fail": 0,
-      "na": 6,
-      "pass": 60,
+      "na": 66,
+      "pass": 0,
       "total": 66
     },
     "third-party-github": {
@@ -52,6 +52,6 @@
       "total": 23
     }
   },
-  "run_id": "local-20260316T142227720Z",
+  "run_id": "local-20260322T012407280Z",
   "schema": "pi.ext.conformance_summary.v2"
 }
