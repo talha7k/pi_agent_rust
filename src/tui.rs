@@ -442,11 +442,14 @@ fn split_markdown_fenced_code_blocks(markdown: &str) -> Vec<MarkdownChunk> {
     }
 
     if in_code_block {
-        // Unterminated fence; fall back to treating the entire input as plain markdown.
-        return vec![MarkdownChunk::Text(markdown.to_string())];
-    }
-
-    if !text_buf.is_empty() {
+        // Unterminated fence (common during streaming).
+        // Emit as a valid code block so it gets syntax highlighting while streaming,
+        // and doesn't destroy previous chunks.
+        chunks.push(MarkdownChunk::CodeBlock {
+            language: code_language.take(),
+            code: code_buf,
+        });
+    } else if !text_buf.is_empty() {
         chunks.push(MarkdownChunk::Text(text_buf));
     }
 
@@ -860,20 +863,21 @@ mod tests {
     }
 
     #[test]
-    fn split_markdown_fenced_code_blocks_unterminated_fence_falls_back_to_text() {
+    fn split_markdown_fenced_code_blocks_unterminated_fence_emits_as_code_block() {
         let input = "Intro\n\n```rust\nfn main() {}\n";
         let chunks = split_markdown_fenced_code_blocks(input);
 
         assert_eq!(
             chunks.len(),
-            1,
-            "expected a single Text chunk, got {chunks:?}"
+            2,
+            "expected a text chunk and an unterminated code block chunk"
         );
-        let MarkdownChunk::Text(text) = &chunks[0] else {
-            unreachable!("expected text fallback, got {chunks:?}");
+        assert!(matches!(chunks[0], MarkdownChunk::Text(ref t) if t.contains("Intro")));
+        let MarkdownChunk::CodeBlock { language, code } = &chunks[1] else {
+            unreachable!("expected code block, got {:?}", chunks[1]);
         };
-        assert!(text.contains("```rust"));
-        assert!(text.contains("fn main"));
+        assert_eq!(language.as_deref(), Some("rust"));
+        assert!(code.contains("fn main"));
     }
 
     #[test]
