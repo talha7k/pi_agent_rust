@@ -2511,7 +2511,7 @@ impl<C: SchedulerClock + 'static> ExtensionDispatcher<C> {
 
         fn pump_stream<R: std::io::Read>(
             mut reader: R,
-            tx: &SyncSender<ExecStreamFrame>,
+            tx: &std::sync::mpsc::Sender<ExecStreamFrame>,
             stdout: bool,
         ) -> std::result::Result<(), String> {
             let mut buf = [0u8; 4096];
@@ -2723,7 +2723,7 @@ impl<C: SchedulerClock + 'static> ExtensionDispatcher<C> {
 
             let cmd = cmd.to_string();
             let args = args.clone();
-            let (tx, rx) = mpsc::sync_channel::<ExecStreamFrame>(1024);
+            let (tx, rx) = std::sync::mpsc::channel::<ExecStreamFrame>();
             let cancel = Arc::new(AtomicBool::new(false));
             let cancel_worker = Arc::clone(&cancel);
             let call_id_for_error = call_id.to_string();
@@ -2890,7 +2890,7 @@ impl<C: SchedulerClock + 'static> ExtensionDispatcher<C> {
 
             fn pump_stream(
                 mut reader: impl std::io::Read,
-                tx: &std::sync::mpsc::SyncSender<StreamChunk>,
+                tx: &std::sync::mpsc::Sender<StreamChunk>,
                 kind: StreamKind,
             ) {
                 let mut buf = [0u8; 8192];
@@ -2927,7 +2927,7 @@ impl<C: SchedulerClock + 'static> ExtensionDispatcher<C> {
                 let stdout = child.stdout.take().ok_or("Missing stdout pipe")?;
                 let stderr = child.stderr.take().ok_or("Missing stderr pipe")?;
 
-                let (tx, rx) = std::sync::mpsc::sync_channel::<StreamChunk>(128);
+                let (tx, rx) = std::sync::mpsc::channel::<StreamChunk>();
                 let tx_stdout = tx.clone();
                 let _stdout_handle =
                     thread::spawn(move || pump_stream(stdout, &tx_stdout, StreamKind::Stdout));

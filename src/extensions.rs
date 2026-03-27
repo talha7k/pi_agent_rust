@@ -22286,7 +22286,7 @@ async fn dispatch_hostcall_exec_ref_with_limit(
 
     fn pump_stream<R: std::io::Read>(
         mut reader: R,
-        tx: &SyncSender<ExecStreamFrame>,
+        tx: &std::sync::mpsc::Sender<ExecStreamFrame>,
         stdout: bool,
     ) -> std::result::Result<(), String> {
         let mut buf = [0u8; 4096];
