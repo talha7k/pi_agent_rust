@@ -963,6 +963,19 @@ impl Agent {
                     {
                         Ok(outcome) => outcome,
                         Err(err) => {
+                            let err_string = err.to_string();
+                            let steering_to_add = self.drain_steering_messages().await;
+                            for message in steering_to_add {
+                                self.messages.push(message.clone());
+                                on_event(AgentEvent::MessageStart {
+                                    message: message.clone(),
+                                });
+                                on_event(AgentEvent::MessageEnd {
+                                    message: message.clone(),
+                                });
+                                new_messages.push(message);
+                            }
+
                             let turn_end_event = AgentEvent::TurnEnd {
                                 session_id: session_id.clone(),
                                 turn_index: current_turn_index,
