@@ -6742,11 +6742,6 @@ impl AgentSession {
                 .await
                 .map_err(|e| Error::session(e.to_string()))?;
             for message in new_messages {
-                if let crate::model::Message::Assistant(ref a) = message {
-                    if a.error_message.is_some() {
-                        continue;
-                    }
-                }
                 session.append_model_message(message);
             }
             if self.save_enabled {
