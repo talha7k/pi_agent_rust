@@ -2095,6 +2095,7 @@ fn parse_manifest_entries_field(
     obj: &serde_json::Map<String, Value>,
     key: &str,
     manifest_path: &Path,
+    package_root: &Path,
 ) -> Result<Option<Vec<String>>> {
     let Some(value) = obj.get(key) else {
         return Ok(None);
@@ -2114,10 +2115,93 @@ fn parse_manifest_entries_field(
                 manifest_path.display()
             )));
         };
-        out.push(entry.to_string());
+        out.push(validate_manifest_entry(
+            package_root,
+            manifest_path,
+            key,
+            entry,
+        )?);
     }
 
     Ok(Some(out))
+}
+
+fn validate_manifest_entry(
+    package_root: &Path,
+    manifest_path: &Path,
+    field_name: &str,
+    entry: &str,
+) -> Result<String> {
+    let trimmed = entry.trim();
+    if trimmed.is_empty() {
+        return Err(Error::config(format!(
+            "Invalid package manifest {}: `pi.{field_name}` entries must be non-empty paths",
+            manifest_path.display()
+        )));
+    }
+
+    let path_part = trimmed
+        .strip_prefix('!')
+        .or_else(|| trimmed.strip_prefix('+'))
+        .or_else(|| trimmed.strip_prefix('-'))
+        .unwrap_or(trimmed);
+    if path_part.is_empty() {
+        return Err(Error::config(format!(
+            "Invalid package manifest {}: `pi.{field_name}` entries must be non-empty paths",
+            manifest_path.display()
+        )));
+    }
+
+    let relative = Path::new(path_part);
+    if relative.is_absolute() {
+        return Err(Error::config(format!(
+            "Invalid package manifest {}: `pi.{field_name}` paths must stay within the package root",
+            manifest_path.display()
+        )));
+    }
+
+    let mut depth = 0usize;
+    for component in relative.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(_) => depth = depth.saturating_add(1),
+            std::path::Component::ParentDir => {
+                if depth == 0 {
+                    return Err(Error::config(format!(
+                        "Invalid package manifest {}: `pi.{field_name}` paths must stay within the package root",
+                        manifest_path.display()
+                    )));
+                }
+                depth -= 1;
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(Error::config(format!(
+                    "Invalid package manifest {}: `pi.{field_name}` paths must stay within the package root",
+                    manifest_path.display()
+                )));
+            }
+        }
+    }
+
+    let resolved = package_root.join(relative);
+    if resolved.exists() && !manifest_path_within_root(&resolved, package_root) {
+        return Err(Error::config(format!(
+            "Invalid package manifest {}: `pi.{field_name}` paths must stay within the package root",
+            manifest_path.display()
+        )));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+fn manifest_path_within_root(target: &Path, root: &Path) -> bool {
+    let Ok(root) = root.canonicalize() else {
+        return false;
+    };
+    let Ok(target) = target.canonicalize() else {
+        return false;
+    };
+    target == root || target.starts_with(&root)
 }
 
 fn read_pi_manifest(package_root: &Path) -> Result<Option<PiManifest>> {
@@ -2148,10 +2232,10 @@ fn read_pi_manifest(package_root: &Path) -> Result<Option<PiManifest>> {
     };
 
     Ok(Some(PiManifest {
-        extensions: parse_manifest_entries_field(obj, "extensions", &manifest_path)?,
-        skills: parse_manifest_entries_field(obj, "skills", &manifest_path)?,
-        prompts: parse_manifest_entries_field(obj, "prompts", &manifest_path)?,
-        themes: parse_manifest_entries_field(obj, "themes", &manifest_path)?,
+        extensions: parse_manifest_entries_field(obj, "extensions", &manifest_path, package_root)?,
+        skills: parse_manifest_entries_field(obj, "skills", &manifest_path, package_root)?,
+        prompts: parse_manifest_entries_field(obj, "prompts", &manifest_path, package_root)?,
+        themes: parse_manifest_entries_field(obj, "themes", &manifest_path, package_root)?,
     }))
 }
 
@@ -2464,6 +2548,10 @@ fn collect_files_from_manifest_entries(
     root: &Path,
     resource_type: ResourceType,
 ) -> Vec<PathBuf> {
+    if resource_type == ResourceType::Extensions {
+        return collect_extension_manifest_entries(entries, root);
+    }
+
     let plain = entries
         .iter()
         .filter(|e| !is_pattern(e))
@@ -2482,6 +2570,50 @@ fn collect_files_from_manifest_entries(
         .collect::<Vec<_>>();
 
     collect_files_from_paths(&resolved, resource_type)
+}
+
+fn collect_extension_manifest_entries(entries: &[String], root: &Path) -> Vec<PathBuf> {
+    let plain = entries
+        .iter()
+        .filter(|entry| !is_pattern(entry))
+        .map(|entry| root.join(entry))
+        .collect::<Vec<_>>();
+
+    let mut out = Vec::new();
+    let root_identity = canonical_identity_path(root);
+    for path in plain {
+        if !path.exists() {
+            continue;
+        }
+
+        let Ok(stats) = fs::metadata(&path) else {
+            continue;
+        };
+        if stats.is_file() {
+            if !is_supported_extension_file(&path) {
+                warn!(
+                    path = %path.display(),
+                    "Ignoring unsupported package.json#pi.extensions entry; use extension.json, JS/TS entrypoints, *.native.json, or *.wasm"
+                );
+                continue;
+            }
+            out.push(path);
+            continue;
+        }
+
+        if !stats.is_dir() {
+            continue;
+        }
+
+        if canonical_identity_path(&path) == root_identity {
+            out.push(path);
+            continue;
+        }
+
+        out.extend(collect_auto_extension_entries(&path));
+    }
+
+    out
 }
 
 fn collect_files_recursive(dir: &Path, ext: &str) -> Vec<PathBuf> {
@@ -2669,21 +2801,20 @@ fn resolve_extension_entries(dir: &Path) -> Option<Vec<PathBuf>> {
         match read_pi_manifest(dir) {
             Ok(Some(manifest)) => {
                 if let Some(exts) = manifest.extensions {
-                    let mut entries = Vec::new();
-                    for ext_path in exts {
-                        let resolved = dir.join(ext_path);
-                        if !resolved.exists() {
-                            continue;
-                        }
-                        if resolved.is_file() && !is_supported_extension_file(&resolved) {
-                            warn!(
-                                path = %resolved.display(),
-                                "Ignoring unsupported package.json#pi.extensions entry; use extension.json, JS/TS entrypoints, *.native.json, or *.wasm"
-                            );
-                            continue;
-                        }
-                        entries.push(resolved);
-                    }
+                    let all_files = collect_extension_manifest_entries(&exts, dir);
+                    let patterns = exts
+                        .iter()
+                        .filter(|entry| is_pattern(entry))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let mut entries = if patterns.is_empty() {
+                        all_files
+                    } else {
+                        let enabled = apply_patterns(&all_files, &patterns, dir);
+                        enabled.into_iter().collect::<Vec<_>>()
+                    };
+                    entries.sort();
+                    entries.dedup();
                     return Some(entries);
                 }
             }
@@ -4463,6 +4594,46 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_extension_sources_errors_on_outside_root_manifest_path() {
+        run_async(async {
+            let temp_dir = tempfile::tempdir().expect("tempdir");
+            let package_root = temp_dir.path().join("pkg");
+            let escaped_dir = temp_dir.path().join("escaped");
+            fs::create_dir_all(&package_root).expect("create package root");
+            fs::create_dir_all(&escaped_dir).expect("create escaped dir");
+            fs::write(escaped_dir.join("index.ts"), "export default {};")
+                .expect("write escaped extension");
+            fs::write(
+                package_root.join("package.json"),
+                serde_json::to_string_pretty(&json!({
+                    "name": "pkg",
+                    "pi": {
+                        "extensions": ["../escaped/index.ts"]
+                    }
+                }))
+                .expect("serialize package.json"),
+            )
+            .expect("write package.json");
+
+            let manager = PackageManager::new(temp_dir.path().to_path_buf());
+            let err = manager
+                .resolve_extension_sources(
+                    &[package_root.to_string_lossy().to_string()],
+                    ResolveExtensionSourcesOptions {
+                        local: false,
+                        temporary: true,
+                    },
+                )
+                .await
+                .expect_err("outside-root manifest entries must fail closed");
+
+            let message = err.to_string();
+            assert!(message.contains("`pi.extensions` paths must stay within the package root"));
+            assert!(message.contains(&package_root.join("package.json").display().to_string()));
+        });
+    }
+
+    #[test]
     fn test_extension_manifest_directory_detected() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let extension_dir = temp_dir.path().join("ext");
@@ -5375,6 +5546,42 @@ mod tests {
         assert!(message.contains(&manifest_path.display().to_string()));
     }
 
+    #[test]
+    fn read_pi_manifest_errors_when_resource_entry_escapes_package_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("package.json");
+        fs::write(
+            &manifest_path,
+            r#"{"name":"pkg","pi":{"extensions":["../outside/index.ts"]}}"#,
+        )
+        .expect("write invalid pi manifest");
+
+        let err =
+            read_pi_manifest(dir.path()).expect_err("outside-root manifest entries must error");
+        let message = err.to_string();
+        assert!(message.contains("Invalid package manifest"));
+        assert!(message.contains("`pi.extensions` paths must stay within the package root"));
+        assert!(message.contains(&manifest_path.display().to_string()));
+    }
+
+    #[test]
+    fn read_pi_manifest_errors_when_resource_pattern_escapes_package_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("package.json");
+        fs::write(
+            &manifest_path,
+            r#"{"name":"pkg","pi":{"extensions":["extensions","+../outside/index.ts"]}}"#,
+        )
+        .expect("write invalid pi manifest");
+
+        let err =
+            read_pi_manifest(dir.path()).expect_err("outside-root override patterns must error");
+        let message = err.to_string();
+        assert!(message.contains("Invalid package manifest"));
+        assert!(message.contains("`pi.extensions` paths must stay within the package root"));
+        assert!(message.contains(&manifest_path.display().to_string()));
+    }
+
     // ======================================================================
     // temporary_dir
     // ======================================================================
@@ -5979,6 +6186,58 @@ mod tests {
         assert!(
             entries.is_empty(),
             "missing package.json#pi.extensions targets must not fall back to index.*"
+        );
+    }
+
+    #[test]
+    fn resolve_extension_entries_applies_manifest_pattern_overrides() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ext_dir = dir.path().join("ext");
+        let nested_dir = ext_dir.join("extensions");
+        fs::create_dir_all(&nested_dir).expect("create nested dir");
+        fs::write(nested_dir.join("a.native.json"), "{}").expect("write a.native.json");
+        fs::write(nested_dir.join("b.native.json"), "{}").expect("write b.native.json");
+        fs::write(
+            ext_dir.join("package.json"),
+            serde_json::to_string_pretty(&json!({
+                "name": "test-pkg",
+                "pi": {
+                    "extensions": ["extensions", "!extensions/b.native.json"]
+                }
+            }))
+            .expect("serialize package.json"),
+        )
+        .expect("write package.json");
+
+        let entries = resolve_extension_entries(&ext_dir).expect("entries");
+        assert_eq!(entries, vec![nested_dir.join("a.native.json")]);
+    }
+
+    #[test]
+    fn collect_auto_extension_entries_fail_closed_on_outside_root_manifest_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ext_dir = dir.path().join("ext");
+        let escaped_dir = dir.path().join("escaped");
+        fs::create_dir_all(&ext_dir).expect("create ext dir");
+        fs::create_dir_all(&escaped_dir).expect("create escaped dir");
+        fs::write(escaped_dir.join("index.ts"), "export default {};").expect("write escaped entry");
+        fs::write(ext_dir.join("index.ts"), "export default {};").expect("write fallback entry");
+        fs::write(
+            ext_dir.join("package.json"),
+            serde_json::to_string_pretty(&json!({
+                "name": "test-pkg",
+                "pi": {
+                    "extensions": ["../escaped/index.ts"]
+                }
+            }))
+            .expect("serialize package.json"),
+        )
+        .expect("write package.json");
+
+        let entries = collect_auto_extension_entries(&ext_dir);
+        assert!(
+            entries.is_empty(),
+            "outside-root package.json#pi.extensions must disable conventional fallback"
         );
     }
 
