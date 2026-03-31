@@ -1635,11 +1635,18 @@ async fn handle_package_update(manager: &PackageManager, source: Option<String>)
 
         let resolved_source = manager.resolve_install_source_alias(source);
         let identity = manager.package_identity(&resolved_source);
+        let mut matched = false;
         for entry in entries {
             if manager.package_identity(&entry.source) != identity {
                 continue;
             }
+            matched = true;
             manager.update_source(&entry.source, entry.scope).await?;
+        }
+        if !matched {
+            bail!(pi::error::Error::validation(format!(
+                "Package source not found: {source}"
+            )));
         }
         if resolved_source == source {
             println!("Updated {source}");
@@ -4859,6 +4866,27 @@ mod tests {
             .expect_err("blank package update source should fail");
 
         assert!(err.to_string().contains("Package source must be non-empty"));
+    }
+
+    #[test]
+    fn handle_package_update_errors_when_source_is_not_installed() {
+        let temp = TempDir::new().expect("tempdir");
+        let manager = PackageManager::new(temp.path().to_path_buf());
+        let runtime = RuntimeBuilder::current_thread()
+            .build()
+            .expect("build runtime");
+
+        let err = runtime
+            .block_on(handle_package_update(
+                &manager,
+                Some("npm:missing".to_string()),
+            ))
+            .expect_err("unknown explicit package source should fail");
+
+        assert!(
+            err.to_string()
+                .contains("Package source not found: npm:missing")
+        );
     }
 
     #[test]
