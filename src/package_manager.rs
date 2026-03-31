@@ -3307,15 +3307,35 @@ fn local_path_from_spec(spec: &str, cwd: &Path) -> PathBuf {
     let spec = spec.trim();
     if let Some(rest) = spec.strip_prefix("file://") {
         // Keep the triple-slash form (`file:///abs/path`) working by stripping only the scheme.
-        return resolve_local_path(file_url_local_path(rest), cwd);
+        return resolve_local_path(&file_url_local_path(rest), cwd);
     }
     resolve_local_path(spec, cwd)
 }
 
-fn file_url_local_path(path: &str) -> &str {
-    path.strip_prefix('/')
+fn file_url_local_path(path: &str) -> String {
+    let path = path.trim();
+
+    if let Some(stripped) = path
+        .strip_prefix('/')
         .filter(|stripped| looks_like_windows_drive_absolute_path(stripped))
-        .unwrap_or(path)
+    {
+        return stripped.to_string();
+    }
+
+    if path.eq_ignore_ascii_case("localhost") {
+        return "/".to_string();
+    }
+    if let Some((host, stripped)) = path.split_once('/') {
+        if host.eq_ignore_ascii_case("localhost") {
+            return format!("/{stripped}");
+        }
+    }
+
+    if !path.is_empty() && !path.starts_with('/') {
+        return format!("//{path}");
+    }
+
+    path.to_string()
 }
 
 fn resolve_local_path(input: &str, cwd: &Path) -> PathBuf {
@@ -5984,6 +6004,28 @@ mod tests {
         assert_eq!(
             local_path_from_spec("file:///C:\\packages\\demo", dir.path()),
             PathBuf::from("C:\\packages\\demo")
+        );
+    }
+
+    #[test]
+    fn local_path_from_file_url_localhost_keeps_absolute_root() {
+        let cwd = Path::new("/home/user/project");
+        assert_eq!(
+            local_path_from_spec("file://localhost/tmp/repo", cwd),
+            PathBuf::from("/tmp/repo")
+        );
+        assert_eq!(
+            local_path_from_spec("file://localhost", cwd),
+            PathBuf::from("/")
+        );
+    }
+
+    #[test]
+    fn local_path_from_file_url_network_share_keeps_network_root() {
+        let cwd = Path::new("/home/user/project");
+        assert_eq!(
+            local_path_from_spec("file://server/share/repo", cwd),
+            PathBuf::from("//server/share/repo")
         );
     }
 
