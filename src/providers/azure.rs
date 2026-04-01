@@ -308,6 +308,7 @@ impl Provider for AzureOpenAIProvider {
 
                     match state.event_source.next().await {
                         Some(Ok(msg)) => {
+                            state.write_zero_count = 0;
                             // Azure also sends "[DONE]" as final message
                             if msg.data == "[DONE]" {
                                 state.done = true;
@@ -322,6 +323,21 @@ impl Provider for AzureOpenAIProvider {
                             }
                         }
                         Some(Err(e)) => {
+                            const MAX_CONSECUTIVE_WRITE_ZERO: usize = 5;
+                            if e.kind() == std::io::ErrorKind::WriteZero {
+                                state.write_zero_count += 1;
+                                if state.write_zero_count <= MAX_CONSECUTIVE_WRITE_ZERO {
+                                    tracing::warn!(
+                                        count = state.write_zero_count,
+                                        "Transient WriteZero error in SSE stream, continuing"
+                                    );
+                                    continue;
+                                }
+                                tracing::warn!(
+                                    "WriteZero error persisted after {MAX_CONSECUTIVE_WRITE_ZERO} \
+                                     consecutive attempts, treating as fatal"
+                                );
+                            }
                             state.done = true;
                             let err = Error::api(format!("SSE error: {e}"));
                             return Some((Err(err), state));
@@ -359,6 +375,8 @@ where
     pending_events: VecDeque<StreamEvent>,
     started: bool,
     done: bool,
+    /// Consecutive WriteZero errors seen without a successful event in between.
+    write_zero_count: usize,
 }
 
 struct ToolCallState {
@@ -390,6 +408,7 @@ where
             pending_events: VecDeque::new(),
             started: false,
             done: false,
+            write_zero_count: 0,
         }
     }
 

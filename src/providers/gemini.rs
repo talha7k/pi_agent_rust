@@ -399,6 +399,7 @@ impl Provider for GeminiProvider {
 
                         match state.event_source.next().await {
                             Some(Ok(msg)) => {
+                                state.write_zero_count = 0;
                                 if msg.event == "ping" {
                                     continue;
                                 }
@@ -414,6 +415,21 @@ impl Provider for GeminiProvider {
                                 }
                             }
                             Some(Err(e)) => {
+                                const MAX_CONSECUTIVE_WRITE_ZERO: usize = 5;
+                                if e.kind() == std::io::ErrorKind::WriteZero {
+                                    state.write_zero_count += 1;
+                                    if state.write_zero_count <= MAX_CONSECUTIVE_WRITE_ZERO {
+                                        tracing::warn!(
+                                            count = state.write_zero_count,
+                                            "Transient WriteZero error in SSE stream, continuing"
+                                        );
+                                        continue;
+                                    }
+                                    tracing::warn!(
+                                        "WriteZero error persisted after {MAX_CONSECUTIVE_WRITE_ZERO} \
+                                         consecutive attempts, treating as fatal"
+                                    );
+                                }
                                 state.finished = true;
                                 let err = Error::api(format!("SSE error: {e}"));
                                 return Some((Err(err), state));
@@ -513,6 +529,7 @@ impl Provider for GeminiProvider {
 
                     match state.event_source.next().await {
                         Some(Ok(msg)) => {
+                            state.write_zero_count = 0;
                             if msg.event == "ping" {
                                 continue;
                             }
@@ -528,6 +545,21 @@ impl Provider for GeminiProvider {
                             }
                         }
                         Some(Err(e)) => {
+                            const MAX_CONSECUTIVE_WRITE_ZERO: usize = 5;
+                            if e.kind() == std::io::ErrorKind::WriteZero {
+                                state.write_zero_count += 1;
+                                if state.write_zero_count <= MAX_CONSECUTIVE_WRITE_ZERO {
+                                    tracing::warn!(
+                                        count = state.write_zero_count,
+                                        "Transient WriteZero error in SSE stream, continuing"
+                                    );
+                                    continue;
+                                }
+                                tracing::warn!(
+                                    "WriteZero error persisted after {MAX_CONSECUTIVE_WRITE_ZERO} \
+                                     consecutive attempts, treating as fatal"
+                                );
+                            }
                             state.finished = true;
                             let err = Error::api(format!("SSE error: {e}"));
                             return Some((Err(err), state));
@@ -561,6 +593,8 @@ where
     pending_events: VecDeque<StreamEvent>,
     started: bool,
     finished: bool,
+    /// Consecutive WriteZero errors seen without a successful event in between.
+    write_zero_count: usize,
 }
 
 impl<S> StreamState<S>
@@ -583,6 +617,7 @@ where
             pending_events: VecDeque::new(),
             started: false,
             finished: false,
+            write_zero_count: 0,
         }
     }
 

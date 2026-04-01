@@ -235,6 +235,7 @@ impl Provider for CohereProvider {
 
                     match state.event_source.next().await {
                         Some(Ok(msg)) => {
+                            state.write_zero_count = 0;
                             if msg.data == "[DONE]" {
                                 state.finish();
                                 continue;
@@ -245,6 +246,21 @@ impl Provider for CohereProvider {
                             }
                         }
                         Some(Err(e)) => {
+                            const MAX_CONSECUTIVE_WRITE_ZERO: usize = 5;
+                            if e.kind() == std::io::ErrorKind::WriteZero {
+                                state.write_zero_count += 1;
+                                if state.write_zero_count <= MAX_CONSECUTIVE_WRITE_ZERO {
+                                    tracing::warn!(
+                                        count = state.write_zero_count,
+                                        "Transient WriteZero error in SSE stream, continuing"
+                                    );
+                                    continue;
+                                }
+                                tracing::warn!(
+                                    "WriteZero error persisted after {MAX_CONSECUTIVE_WRITE_ZERO} \
+                                     consecutive attempts, treating as fatal"
+                                );
+                            }
                             let err = Error::api(format!("SSE error: {e}"));
                             return Some((Err(err), state));
                         }
@@ -286,6 +302,8 @@ where
     finished: bool,
     content_index_map: HashMap<u32, usize>,
     active_tool_call: Option<ToolCallAccum>,
+    /// Consecutive WriteZero errors seen without a successful event in between.
+    write_zero_count: usize,
 }
 
 impl<S> StreamState<S>
@@ -310,6 +328,7 @@ where
             finished: false,
             content_index_map: HashMap::new(),
             active_tool_call: None,
+            write_zero_count: 0,
         }
     }
 
