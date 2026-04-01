@@ -22496,7 +22496,7 @@ async fn dispatch_hostcall_exec_ref_with_limit(
             // Keep the pump threads draining pipes even if the runtime is
             // temporarily behind on chunk delivery. Bounded channels can
             // recreate the same shell/pipe deadlock seen in the main bash tool.
-            let (tx, rx) = mpsc::channel::<ExecStreamFrame>();
+            let (tx, rx) = mpsc::sync_channel::<ExecStreamFrame>(1024);
             let cancel = Arc::new(AtomicBool::new(false));
             let cancel_worker = Arc::clone(&cancel);
             let call_id_for_error = call_id.to_string();
