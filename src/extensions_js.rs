@@ -496,6 +496,9 @@ fn js_to_json_inner(value: &Value<'_>, depth: usize) -> rquickjs::Result<serde_j
                 ));
             }
             let (k, v) = item?;
+            if v.is_undefined() || v.is_function() || v.is_symbol() {
+                continue;
+            }
             result.insert(k, js_to_json_inner(&v, depth + 1)?);
         }
         return Ok(serde_json::Value::Object(result));
