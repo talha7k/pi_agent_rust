@@ -5,7 +5,7 @@
   "main": "docker-launcher.js",
   "type": "module",
   "scripts": {
-    "build": "docker build -t claude-sandbox .",
+    "build": "node init && docker build -t claude-sandbox .",
     "clean": "docker rmi claude-sandbox || true"
   },
   "dependencies": {
