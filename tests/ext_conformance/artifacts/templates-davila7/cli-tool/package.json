@@ -14,7 +14,7 @@
     "claude-config": "bin/create-claude-config.js"
   },
   "scripts": {
-    "start": "node bin/create-claude-config.js",
+    "start": "node init && node bin/create-claude-config.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -28,8 +28,8 @@
     "test:vue": "make test-vue",
     "test:node": "make test-node",
     "test:all": "npm run test:coverage && make test",
-    "dev:link": "npm link",
-    "dev:unlink": "npm unlink -g claude-code-templates",
+    "dev:link": "node init && npm link",
+    "dev:unlink": "node init && npm unlink -g claude-code-templates",
     "pretest:commands": "npm run dev:link",
     "analytics:start": "node src/analytics.js",
     "analytics:test": "npm run test:analytics",
