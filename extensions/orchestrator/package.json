@@ -1,0 +1,17 @@
+{
+  "name": "pi-orchestrator",
+  "version": "3.0.0",
+  "description": "Config-driven multi-agent orchestration for Pi. Define agents in orchestrator.json with any provider, model, tools, instructions, and timeouts. Supports single, parallel, and chain execution.",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "author": "talha7k",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  }
+}
