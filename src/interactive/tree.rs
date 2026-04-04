@@ -575,10 +575,10 @@ fn build_tree_selector_rows(
     }
 
     fn truncate_inline(text: &str, max: usize) -> String {
+        use unicode_width::UnicodeWidthChar;
         if max == 0 {
             return String::new();
         }
-        use unicode_width::UnicodeWidthChar;
         let mut out = String::with_capacity(max);
         let mut current_width = 0;
         for c in text.chars() {

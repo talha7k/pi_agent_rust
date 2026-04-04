@@ -1051,6 +1051,7 @@ impl PiApp {
         );
 
         for (idx, item) in self.autocomplete.items[offset..end].iter().enumerate() {
+            use unicode_width::UnicodeWidthStr;
             let global_idx = offset + idx;
             let is_selected = self.autocomplete.selected == Some(global_idx);
 
@@ -1064,7 +1065,6 @@ impl PiApp {
                 AutocompleteItemKind::Path => "📂",
             };
 
-            use unicode_width::UnicodeWidthStr;
             let max_label_len = width.saturating_sub(6);
             let label_width = item.label.width();
             let label = if label_width > max_label_len {
