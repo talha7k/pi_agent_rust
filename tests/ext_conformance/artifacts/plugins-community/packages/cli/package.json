@@ -13,8 +13,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "tsc --watch",
-    "build": "tsc && chmod +x dist/index.js",
+    "dev": "node init && tsc --watch",
+    "build": "node init && tsc && chmod +x dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
