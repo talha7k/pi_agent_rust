@@ -209,6 +209,7 @@ impl AzureOpenAIProvider {
 }
 
 #[async_trait]
+#[allow(clippy::too_many_lines)]
 impl Provider for AzureOpenAIProvider {
     fn name(&self) -> &'static str {
         "azure"
