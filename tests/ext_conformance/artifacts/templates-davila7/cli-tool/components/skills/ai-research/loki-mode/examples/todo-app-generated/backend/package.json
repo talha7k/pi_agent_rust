@@ -5,8 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "start": "node api.js && node dist/index.js",
+    "dev": "node api.js && ts-node src/index.ts"
   },
   "dependencies": {
     "better-sqlite3": "^9.0.0",

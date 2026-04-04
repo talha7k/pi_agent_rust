@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "postinstall": "cd ../common && npm install && npm run build",
-    "dev": "tsx watch src/index.ts",
-    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node api.js && tsx watch src/index.ts",
+    "start": "node api.js && node --experimental-strip-types src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
