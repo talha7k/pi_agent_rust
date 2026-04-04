@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
+    "dev": "node api.js && tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"
   },

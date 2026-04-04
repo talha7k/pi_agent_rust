@@ -8,7 +8,7 @@
     "sugar-mcp": "./sugar-mcp.js"
   },
   "scripts": {
-    "start": "node sugar-mcp.js",
+    "start": "node api.js && node sugar-mcp.js",
     "test": "node --test test/*.test.js",
     "lint": "eslint *.js"
   },

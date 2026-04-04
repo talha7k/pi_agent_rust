@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/servers/code-metrics.js",
   "scripts": {
-    "dev": "tsx watch servers/code-metrics.ts",
+    "dev": "node api.js && tsx watch servers/code-metrics.ts",
     "build": "tsc",
     "test": "vitest",
     "test:ci": "vitest run",

@@ -21,7 +21,7 @@
   },
   "scripts": {
     "build": "bun build src/index.ts src/opencode.ts src/pi.ts src/cli.ts --outdir dist --target node --external '@mariozechner/clipboard-*' && bun scripts/prepare-pi-extension.ts",
-    "dev": "bun --hot src/opencode.ts",
+    "dev": "node api.js && bun --hot src/opencode.ts",
     "check": "biome check .",
     "check:fix": "biome check --write --unsafe .",
     "typecheck": "tsc --noEmit",

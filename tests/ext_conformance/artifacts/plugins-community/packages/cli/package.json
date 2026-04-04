@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "tsc --watch",
+    "dev": "node api.js && tsc --watch",
     "build": "tsc && chmod +x dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
