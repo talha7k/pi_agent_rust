@@ -142,7 +142,9 @@ export async function runSingleAgent(
   );
 
   // Build CLI args
-  const args: string[] = ["--mode", "json", "-p", "--no-session"];
+  // --no-extensions prevents the child pi from loading the orchestrator
+  // (or any other extension) which would cause recursive spawning / deadlocks.
+  const args: string[] = ["--mode", "json", "-p", "--no-session", "--no-extensions"];
   if (agent.provider) args.push("--provider", agent.provider);
   if (agent.model) args.push("--model", agent.model);
   if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
