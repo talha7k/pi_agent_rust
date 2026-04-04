@@ -5,8 +5,8 @@
   "type": "module",
   "main": "dist/servers/code-metrics.js",
   "scripts": {
-    "dev": "tsx watch servers/code-metrics.ts",
-    "build": "tsc",
+    "dev": "node init && tsx watch servers/code-metrics.ts",
+    "build": "node init && tsc",
     "test": "vitest",
     "test:ci": "vitest run",
     "lint": "eslint .",

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/servers/api-debugger.js",
   "scripts": {
-    "build": "tsc",
+    "build": "node init && tsc",
     "test": "vitest",
     "test:coverage": "vitest --coverage"
   },
